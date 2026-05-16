@@ -1,0 +1,60 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.xccheckout
+*.xcscmblueprint
+*.xcscheme
+
+# Build artifacts
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# CocoaPods (not used in Phase 1)
+Pods/
+*.xcworkspace
+
+# Signing — NEVER commit these
+*.p12
+*.mobileprovision
+*.certSigningRequest
+AuthKey_*.p8
+
+# Credentials — NEVER commit these
+.env
+*.env.*
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+fastlane/credentials.json
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Exported app data — treat as sensitive, do not commit accidental exports
+taskflow-export*.json
+taskflow-export*.md
