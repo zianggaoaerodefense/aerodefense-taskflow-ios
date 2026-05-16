@@ -142,58 +142,79 @@ Keep staging and production as completely separate Supabase projects. Never shar
 | Secrets | Staging values | Production values |
 | Agent tokens | Separate tokens per user | Separate tokens per user |
 
-Use Xcode build configurations (Debug/Release) or xcconfig files to switch between staging and production URLs without changing `Info.plist` manually.
+Use EAS environment variables (`eas env:create`) or `.env` files (not committed) to switch between staging and production URLs.
 
 ---
 
-## iOS Dev Build (Simulator / Ad-hoc)
+## EAS Build (Development and Preview Builds)
 
-1. Open `ios/TaskFlow.xcodeproj`.
-2. Select your development team in **Signing & Capabilities**.
-3. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in your active scheme's build settings or a `.xcconfig` file.
-4. Choose a simulator or connected device and press `Cmd+R`.
+[EAS Build](https://docs.expo.dev/build/introduction/) manages cloud builds for iOS and Android.
 
-For an ad-hoc distribution:
-- Archive the app in Xcode (**Product > Archive**).
-- Export with **Ad Hoc** distribution.
-- Share the `.ipa` via Apple Configurator or a distribution link.
+### Set up EAS
+
+```bash
+npx eas-cli login
+npx eas-cli build:configure   # creates eas.json in app/
+```
+
+### Development build (replaces Expo Go, supports native modules)
+
+```bash
+# iOS
+npx eas-cli build --platform ios --profile development
+
+# Android
+npx eas-cli build --platform android --profile development
+```
+
+Install the resulting build on your device or simulator, then start the dev server:
+
+```bash
+cd app && npx expo start --dev-client
+```
+
+### Preview build (internal distribution)
+
+```bash
+npx eas-cli build --platform all --profile preview
+```
+
+This produces a shareable `.ipa` / `.apk` without App Store review.
 
 ---
 
-## TestFlight Distribution
+## EAS Submit (TestFlight / Play Store)
 
-### Requirements
+### Build for production
 
-- Active Apple Developer Program membership.
-- App record created in App Store Connect.
+```bash
+cd app
+npx eas-cli build --platform ios --profile production
+npx eas-cli build --platform android --profile production
+```
 
-### Sensitive files — never commit
+### Submit to TestFlight
 
-| File | Reason |
-|---|---|
-| `*.p12` | Distribution certificate + private key |
-| `*.mobileprovision` | Provisioning profile |
-| `AuthKey_*.p8` | App Store Connect API key |
+```bash
+npx eas-cli submit --platform ios
+```
 
-Store these in your CI/CD secret store only.
+EAS Submit handles the App Store Connect upload. You need an active Apple Developer Program membership and an app record in App Store Connect.
 
-### CI/CD options
+### Submit to Google Play
 
-**Option A: Codemagic**
-1. Connect the GitHub repository to Codemagic.
-2. Add `SUPABASE_URL` (staging/prod) and `SUPABASE_ANON_KEY` as environment variables (mark as secret).
-3. Add the `.p12` and `AuthKey_*.p8` as file environment variables.
-4. Configure the Codemagic workflow to build, sign, and upload to TestFlight.
+```bash
+npx eas-cli submit --platform android
+```
 
-**Option B: GitHub Actions + Fastlane**
-1. Add secrets to the GitHub repository: `APPLE_DEVELOPER_CERT_BASE64`, `APPLE_PROVISIONING_PROFILE_BASE64`, `APP_STORE_CONNECT_API_KEY_BASE64`, `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
-2. Write a `Fastfile` with a `beta` lane that calls `build_app` and `upload_to_testflight`.
-3. Trigger the workflow on push to `main` or a release tag.
+### CI/CD with GitHub Actions
 
-**Option C: Xcode Cloud**
-1. Connect the repository in Xcode's Xcode Cloud settings.
-2. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` as environment variables in the workflow.
-3. Configure: build on push to `main`, sign, upload to TestFlight automatically.
+Add the following secrets to your GitHub repository:
+- `EXPO_TOKEN` — from expo.dev account settings
+- `EXPO_PUBLIC_SUPABASE_URL` — staging or production URL
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY` — staging or production anon key
+
+Never commit these values. Use GitHub Actions secrets or EAS environment variables (`eas env:create`).
 
 ---
 
@@ -209,20 +230,22 @@ Store these in your CI/CD secret store only.
 
 Additional secrets for future integrations (Gmail, Slack, Jira OAuth credentials) are set with `supabase secrets set`.
 
-### iOS App (Info.plist via xcconfig)
+### Expo App (.env file, not committed)
 
-| Key | Value | Notes |
+| Variable | Value | Notes |
 |---|---|---|
-| `SUPABASE_URL` | `https://<ref>.supabase.co` | Not a secret; safe to embed |
-| `SUPABASE_ANON_KEY` | `eyJ...` | Not a secret; restricted by RLS |
+| `EXPO_PUBLIC_SUPABASE_URL` | `https://<ref>.supabase.co` | Not a secret; safe to bundle |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | `eyJ...` | Not a secret; restricted by RLS |
 
-**Never add the service role key to Info.plist or any file in the app bundle.**
+Copy `app/.env.example` to `app/.env` and fill in the values. The `.env` file is gitignored. For EAS builds, use `eas env:create` to set these as EAS environment variables instead.
+
+**Never add the service role key to .env or any file in the app directory.**
 
 ---
 
 ## Supabase Realtime
 
-Realtime is enabled by default in `supabase/config.toml`. No additional configuration is required for the iOS app's Realtime subscriptions to work. Ensure the Realtime service is not disabled in the Supabase dashboard for your project.
+Realtime is enabled by default in `supabase/config.toml`. No additional configuration is required for the Expo app's Realtime subscriptions to work. Ensure the Realtime service is not disabled in the Supabase dashboard for your project.
 
 ---
 
