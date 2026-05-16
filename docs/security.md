@@ -1,6 +1,6 @@
 # TaskFlow Security Notes
 
-This document summarises the security controls in place across the TaskFlow system. It is intended as a concise reference for engineers, reviewers, and auditors. For the full architectural rationale see `docs/architecture.md`.
+This document summarises the security controls across the TaskFlow system. For the full architectural rationale see `docs/architecture.md`.
 
 ---
 
@@ -8,58 +8,72 @@ This document summarises the security controls in place across the TaskFlow syst
 
 **No secrets are committed to the repository.**
 
-- `.env` files are listed in `.gitignore`. Only `.env.example` (containing placeholder values) is tracked.
-- In production, `MONGODB_URI`, `JWT_SECRET`, and `AGENT_JWT_SECRET` are injected at deploy time. They are stored in AWS Systems Manager Parameter Store or AWS Secrets Manager under the `taskflow/` prefix.
-- The Lambda execution role is granted only `secretsmanager:GetSecretValue` on `arn:aws:secretsmanager:*:*:secret:taskflow/*` — no broader IAM permissions.
-- iOS build secrets (Apple Developer certificates, `.p12`, `.mobileprovision`, `AuthKey_*.p8`) must never be committed. CI/CD pipelines (Codemagic, GitHub Actions + Fastlane, or Xcode Cloud) must use their respective secret stores.
+- The Supabase **service role key** exists only as a Supabase project secret, injected automatically into Edge Functions at runtime as `SUPABASE_SERVICE_ROLE_KEY`. It is never in source code, never in the app, and never in CI environment files that could be logged.
+- The **anon key** and **project URL** are embedded in the iOS app via `Info.plist`. These are not secrets — they are designed for client-side use and are restricted by Row-Level Security. Treat them as public identifiers, not credentials.
+- **Agent connection tokens** are generated randomly (32 bytes, hex-encoded). Only the SHA-256 hash is stored in `agent_connections`. The raw token is returned once at creation time and never persisted anywhere in the system.
+- iOS build secrets (Apple Developer certificates, `.p12`, `.mobileprovision`, `AuthKey_*.p8`) must never be committed. CI/CD pipelines (Codemagic, GitHub Actions, Xcode Cloud) use their respective secret stores.
 
 ---
 
-## userId scoping (never trust the client body)
+## `user_id` scoping (never trust the client body)
 
-Every API handler that reads or writes data enforces the following invariant:
+Every API path that reads or writes data enforces this invariant:
 
-> The `userId` and `orgId` written to any database document are always extracted from the cryptographically verified JWT. They are never accepted from the request body, URL parameters, or query string.
+> The `user_id` written to any database row is always derived from the cryptographically verified Supabase session JWT (for app users) or from the `agent_connections` lookup by token hash (for the ChatGPT agent). It is never accepted from the request body, URL parameters, or query string.
 
-This is implemented in `backend/src/middleware/withAuth.ts` and propagated as an `AuthContext` object to every repository call. Repository functions (`taskRepo`, `summaryRepo`, etc.) always include `{ userId: auth.userId, orgId: auth.orgId }` as mandatory query filters — no query runs without both fields.
+For the iOS app: Supabase Row-Level Security policies enforce `auth.uid() = user_id` on every table. Even if the app constructed a query with a different `user_id`, the RLS policy would reject it.
 
-A valid token for user A in org X cannot read, write, or modify data belonging to user B or org Y, even if the client constructs a request body containing those IDs.
+For Edge Functions: The service role key bypasses RLS, so each function performs an explicit ownership check in application code before applying any write. For example, `agent-update-task` fetches the task and asserts `task.user_id === resolvedUserId` before updating.
 
 ---
 
-## Agent scopes
+## Row-Level Security
 
-Agent tokens are signed with `AGENT_JWT_SECRET`, a secret entirely separate from the user `JWT_SECRET`. This means:
+RLS is enabled on all user-owned tables:
 
-- A leaked user token cannot be used to call agent-only endpoints (the signature will fail against the wrong secret).
-- A leaked agent token cannot be used to log in as a user or access user-only endpoints.
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `profiles` | Own row only | Own row only | Own row only | — |
+| `workflows` | Own rows only | Own rows only | Own rows only | — |
+| `workflow_runs` | Own rows only | Own rows only | — | — |
+| `summaries` | Own rows only | Own rows only | Own rows only | — |
+| `tasks` | Own rows only | Own rows only | Own rows only | — |
+| `task_events` | Own rows only | Own rows only | — | — |
+| `agent_messages` | Own rows only | Own rows only | — | — |
+| `agent_connections` | Own rows only | Own rows only | Own rows only | — |
+| `integration_connections` | Own rows only | Own rows only | Own rows only | — |
+| `audit_logs` | Own rows only | — (service role only) | — | — |
 
-Agent JWT payloads must declare an explicit `scopes` array. The backend calls `requireScope(auth, 'scope:name')` at the top of each agent handler. Scopes are not inferred or defaulted — an agent token without a required scope returns `403`.
+No DELETE policies are created for any table. Rows are archived rather than deleted. `task_events` and `audit_logs` are append-only — no UPDATE or DELETE policies exist.
 
-Defined scopes:
+---
 
-| Scope | Grants |
-|---|---|
-| `agent:summaries:create` | `POST /agent/run-results`, `POST /summaries/{id}/task-candidates` |
-| `agent:tasks:read` | `GET /agent/pending-review`, `GET /agent/changes` |
-| `agent:drafts:create` | `POST /agent/followup-drafts` |
-| `agent:approvals:create` | `POST /agent/approval-requests`, `POST /approval-requests/{id}/mark-executed` |
+## Agent connection tokens
+
+The ChatGPT agent authenticates with a token generated by the user in the iOS app.
+
+1. The iOS app calls `create-agent-connection` (authenticated with the user's Supabase JWT).
+2. The Edge Function generates a 32-byte cryptographically random token.
+3. SHA-256 of the token is stored in `agent_connections.token_hash`. The raw token is never stored.
+4. The raw token is returned once in the response.
+5. The user pastes it into their Custom GPT action as the `X-Agent-Token` header value.
+6. On every agent request, the Edge Function hashes the incoming header value and looks it up in `agent_connections`. The `user_id` is read from the database row — never from the request.
+7. Revocation sets `status = 'revoked'`, immediately invalidating all subsequent requests with that token.
+
+---
+
+## Edge Function security boundaries
+
+- **Service role key** is only available inside Edge Functions. It is not passed to the iOS app or the ChatGPT agent.
+- **App user authentication** (`create-agent-connection`, `revoke-agent-connection`) uses the Supabase JWT passed in the `Authorization: Bearer` header. The function calls `supabase.auth.getUser()` to verify it.
+- **Agent authentication** uses `X-Agent-Token`. The function hashes the value and queries `agent_connections` using the service role client. No other authentication method is accepted on agent endpoints.
+- **Ownership enforcement** in agent endpoints is done in application code (not RLS), because the service role bypasses RLS. Every write verifies `existing_row.user_id === resolvedUserId`.
 
 ---
 
 ## Approval model for external actions
 
-No email, Slack message, Jira comment, or other external side-effect is ever triggered automatically without explicit user approval.
-
-The flow is:
-
-1. Agent (or system) creates a `FollowUpDraftDoc` with `status: draft`.
-2. The iOS app surfaces the draft to the user for review.
-3. User edits the draft if needed and taps Approve.
-4. The backend sets `status: approved` and `approvedAt: <timestamp>`.
-5. An `ApprovalRequestDoc` gates the actual send. No send occurs until the approval request reaches `status: executed` via an explicit `POST /approval-requests/{id}/mark-executed` call.
-
-This means the agent can never unilaterally send messages. Every external action has a user-visible, timestamped approval record in the `approvalRequests` collection.
+No email, Slack message, Jira comment, or other external side-effect is triggered automatically. The agent may propose tasks and summaries but cannot initiate external sends. Any future external action capability must go through an explicit user approval flow surfaced in the iOS app.
 
 ---
 
@@ -69,39 +83,33 @@ The iOS app uses Face ID (or device passcode fallback) to protect access to task
 
 - The app locks automatically after a configurable idle period.
 - The lock screen is shown before any sensitive data is rendered.
-- Authentication state is held only in memory — it is not persisted to disk or UserDefaults.
-
----
-
-## HTTPS only
-
-All traffic between the iOS app and the backend travels over HTTPS. The API Gateway HTTP API endpoint is HTTPS-only (TLS 1.2+). The iOS app's `APIConfig` reads the base URL from `UserDefaults` (configurable in Settings), but production and TestFlight builds should always use `https://` URLs. Plain HTTP is only acceptable for local development against `localhost`.
-
-The backend sets `ALLOWED_ORIGINS` in the CORS configuration via the Serverless Framework environment variable. Only explicitly listed origins are permitted.
+- Authentication state is held only in memory; it is not persisted to disk.
 
 ---
 
 ## Token storage on iOS
 
-User tokens are currently stored in `UserDefaults` via `TokenStorage` (see `ios/TaskFlow/Services/APIClient.swift`). A `TODO` comment in that file marks the planned migration to Keychain for production builds. The Keychain provides hardware-backed encryption and prevents token exfiltration via backup or iCloud sync (when `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is used).
+The Supabase Swift SDK stores auth sessions in **Keychain** by default using `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. This provides:
 
-Until the Keychain migration is complete:
-- Tokens are scoped to the app's sandbox and are not accessible to other apps.
-- iCloud backup of `UserDefaults` should be evaluated; consider excluding the token key from backup using `UserDefaults` domain exclusions.
+- Hardware-backed encryption on devices with Secure Enclave.
+- Exclusion from iCloud backup.
+- Isolation from other apps.
+
+The previous `UserDefaults`-based `TokenStorage` in `APIClient.swift` was a Phase 2 workaround. It is superseded by the Supabase SDK's Keychain-backed session storage and should not be used for new auth flows.
 
 ---
 
 ## Audit logging
 
-Every state-mutating API operation writes an `AuditEventDoc` to the `auditEvents` collection. Each event records:
+Every agent write and task update writes an `AuditEventDoc` to `audit_logs`. Each row records:
 
-- `actor` and `actorId` — who performed the action (user, agent, or system)
-- `action` — the operation (e.g., `task.markDone`, `followup.approve`)
-- `entityType` and `entityId` — what was affected
-- `before` / `after` — sanitised snapshots of the document state (secrets and PII are excluded from these snapshots)
-- `createdAt` — server timestamp
+- `actor` and `actor_id` — who performed the action (`user`, `agent`, or `system`)
+- `action` — the operation (e.g., `task.update`, `agent_write`, `agent_connection.create`)
+- `entity_type` and `entity_id` — what was affected
+- `before_snapshot` / `after_snapshot` — sanitised field snapshots (no raw content, no tokens)
+- `created_at` — server timestamp
 
-Audit events are append-only. The audit collection should have no delete or update permissions granted to the application user in MongoDB Atlas.
+`audit_logs` is append-only. No UPDATE or DELETE RLS policies exist. The service role is the only path to INSERT (via Edge Functions). App users can SELECT their own rows.
 
 ---
 
@@ -111,16 +119,21 @@ The following fields are treated as potentially sensitive and must not appear in
 
 | Field | Reason |
 |---|---|
-| `rawText` on summaries | May contain the full body of emails, Slack threads, or documents |
-| `recipientOrTarget` on follow-up drafts | May contain email addresses or Slack handles (PII) |
-| `body` on follow-up drafts | May contain sensitive operational content |
-| `payload` on approval requests | Contains details of the external action to be taken |
-| `sourceRefs[*].rawContent` | Raw external content fetched from email/Slack/Jira |
+| `summaries.content` | May contain full body of meeting notes, emails, or documents |
+| `agent_connections.token_hash` | Must not be logged alongside user-identifying info |
+| Raw agent token | Never stored; must not appear in any log output |
+| Integration OAuth tokens | Must be stored in Supabase Vault, not in `integration_connections` or any app-visible table |
+
+Audit snapshot fields contain only status, priority, and count values — never raw text content.
 
 ---
 
-## Future: encryption at rest for sensitive fields
+## HTTPS only
 
-Currently all data is encrypted at rest by MongoDB Atlas (AES-256 at the volume level). A future phase should implement field-level encryption (FLE) for the highest-sensitivity fields listed above (`rawText`, `body`, `recipientOrTarget`) using MongoDB Client-Side Field Level Encryption (CSFLE) with AWS KMS as the key provider.
+All traffic between the iOS app and Supabase, and between the ChatGPT agent and Edge Functions, travels over HTTPS (TLS 1.2+). Supabase enforces HTTPS for all hosted endpoints. The iOS app's `SupabaseConfig.url` must always use `https://` in staging and production builds. Plain HTTP is only acceptable for local development against `127.0.0.1`.
 
-This would ensure that even a full database dump cannot be read without access to the KMS key, providing defence-in-depth against cloud storage compromise.
+---
+
+## Future: field-level encryption
+
+Currently all data is encrypted at rest by Supabase's managed Postgres infrastructure. A future phase should implement field-level encryption for the highest-sensitivity fields (`summaries.content`, `agent_messages.content`) using Supabase Vault or a KMS-backed approach. This would provide defence-in-depth against cloud storage compromise.
