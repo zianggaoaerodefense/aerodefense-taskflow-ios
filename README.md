@@ -1,6 +1,6 @@
 # TaskFlow — Private CTO Workflow System
 
-**Monorepo: iOS App + Supabase Backend + ChatGPT Agent**
+**Monorepo: Expo App + Supabase Backend + ChatGPT Agent**
 
 A private, secure task-management system that turns meeting notes, GPT summaries, email, Slack, and Jira inputs into structured task cards with a full review-and-action workflow.
 
@@ -9,11 +9,11 @@ A private, secure task-management system that turns meeting notes, GPT summaries
 ## Architecture
 
 ```
-iPhone SwiftUI App (primary UI, SwiftData local cache)
+Expo React Native App (primary UI, expo-secure-store sessions)
         ↕ HTTPS (Supabase anon key + user JWT, bound by RLS)
 Supabase Postgres (system of record, Row-Level Security)
         ↕ Realtime
-iPhone SwiftUI App (auto-refresh on agent writes)
+Expo React Native App (auto-refresh on agent writes)
 
 ChatGPT Custom GPT (agent interface)
         ↕ HTTPS (X-Agent-Token header)
@@ -30,7 +30,7 @@ Supabase Postgres (queries scoped to resolved user_id)
 
 ```
 /
-├── ios/                              # iPhone SwiftUI app
+├── ios/                              # SwiftUI app (legacy reference)
 │   ├── TaskFlow.xcodeproj/
 │   └── TaskFlow/
 │       ├── Models/                   # SwiftData @Model classes
@@ -39,6 +39,15 @@ Supabase Postgres (queries scoped to resolved user_id)
 │       ├── Views/                    # SwiftUI views
 │       │   └── Settings/            # ConnectAgentView, SettingsView
 │       └── Resources/               # SampleData
+│
+├── app/                              # Expo React Native app (MVP)
+│   ├── app/                         # Expo Router routes
+│   │   ├── (auth)/                  # Sign-in, sign-up
+│   │   ├── (tabs)/                  # Tasks, Summaries, Workflows, Settings
+│   │   └── agent-connections.tsx    # Agent connection management
+│   ├── lib/                         # supabase.ts (SecureStore adapter)
+│   ├── services/                    # tasks.ts, summaries.ts, workflows.ts, agentConnections.ts
+│   └── types/                       # database.ts
 │
 ├── supabase/                         # Supabase project
 │   ├── config.toml                  # Local dev configuration
@@ -91,14 +100,13 @@ supabase db reset
 supabase functions serve --import-map supabase/functions/import_map.json
 ```
 
-### iOS
+### Expo App
 
-1. Open `ios/TaskFlow.xcodeproj` in Xcode.
-2. Add the Supabase Swift SDK via **File → Add Package Dependencies**:
-   - URL: `https://github.com/supabase/supabase-swift` (version 2.x)
-   - Products: `Supabase`, `Realtime`
-3. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in your target's `Info.plist`.
-4. Select an iPhone simulator (iOS 17+) and press `Cmd+R`.
+1. Copy the env file: `cp app/.env.example app/.env`
+2. Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from **Supabase → Settings → API**.
+3. Install dependencies: `cd app && npm install`
+4. Start the dev server: `npx expo start`
+5. Press `i` for iOS Simulator, `a` for Android Emulator, or scan the QR code with Expo Go.
 
 ---
 
@@ -114,8 +122,7 @@ supabase functions serve --import-map supabase/functions/import_map.json
 | RLS enabled on all user-owned tables | Enabled on all 10 tables; no DELETE policies |
 | Every task mutation emits task_events | App and agent both insert a `task_events` row on every change |
 | Audit log for agent writes and updates | `audit_logs` table; append-only; no raw content in snapshots |
-| iOS sessions stored in Keychain | Supabase Swift SDK uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` by default |
-| Face ID / Passcode on iOS | `LocalAuthentication` in `SecurityLockService.swift` |
+| Expo sessions in SecureStore | expo-secure-store stores the Supabase JWT in hardware-backed Keychain (iOS) with chunking for large tokens |
 | No secrets committed | `.gitignore` blocks `.env`, `*.p12`, `AuthKey_*.p8` |
 
 ---
@@ -132,10 +139,10 @@ supabase functions serve --import-map supabase/functions/import_map.json
 2. Edge Function resolves `user_id` from token (not from request body).
 3. Inserts task with `source='agent'` and `user_id` from lookup.
 4. Inserts `task_events` row: `actor='agent'`, `event_type='created'`.
-5. iOS Realtime subscription fires → app refreshes.
+5. Expo Realtime subscription fires → app refreshes.
 
 ### User changes a task in the app
-1. User taps "Complete" → `SupabaseTaskService.completeTask()`.
+1. User taps "Complete" → `completeTask() from the tasks service`.
 2. Updates `tasks.status = 'done'` (RLS enforces scope).
 3. Inserts `task_events` row: `actor='user'`, `event_type='status_changed'`.
 4. Next GPT context call sees the task in `recently_completed_tasks`.
@@ -179,14 +186,14 @@ open → in_progress → done → archived
 
 | Feature | Phase |
 |---------|-------|
-| Local SwiftData cache | ✅ Phase 1 |
-| Face ID lock | ✅ Phase 1 |
+| Local SwiftData cache (legacy SwiftUI) | ✅ Phase 1 |
+| Face ID lock (legacy SwiftUI) | ✅ Phase 1 |
 | JSON export/import (debug only) | ✅ Phase 1 |
 | Supabase Postgres schema + RLS | ✅ Phase 2 (current) |
-| Supabase Auth in iOS app | ✅ Phase 2 (current) |
+| Supabase Auth in Expo app | ✅ Phase 2 (current) |
 | Supabase Edge Functions for agent | ✅ Phase 2 (current) |
-| ChatGPT agent connection UI | ✅ Phase 2 (current) |
-| Supabase Realtime task refresh | ✅ Phase 2 (current) |
+| ChatGPT agent connection UI in Expo app | ✅ Phase 2 (current) |
+| Supabase Realtime task refresh in Expo app | ✅ Phase 2 (current) |
 | Gmail integration (read + draft) | Phase 3 |
 | Slack integration (read + draft) | Phase 3 |
 | Jira integration (read + comment) | Phase 3 |
@@ -201,7 +208,7 @@ open → in_progress → done → archived
 
 - No automatic external sending (email, Slack, Jira) — approval required
 - No public App Store release
-- No direct Postgres access from iOS app or ChatGPT agent
+- No direct Postgres access from Expo app or ChatGPT agent
 - No committed secrets (service role key, API keys, tokens)
 - No analytics
 
@@ -213,7 +220,7 @@ See `docs/security.md` for full details.
 
 **Never commit:**
 - `.env` files
-- `*.p12` / `*.mobileprovision` / `AuthKey_*.p8`
+- `*.p12` / `*.mobileprovision` / `AuthKey_*.p8` (applies to EAS/CI builds and any legacy iOS signing artifacts)
 - Supabase service role key
 - Agent connection tokens
 - Exported task data JSON files (`taskflow-export*.json`)

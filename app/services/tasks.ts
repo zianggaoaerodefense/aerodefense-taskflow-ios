@@ -3,10 +3,13 @@
 // see user-side changes on the next agent-context call.
 //
 // SECURITY:
-// - user_id is never passed in task insert/update payloads (set by RLS).
-// - task_events.user_id is NOT NULL with an RLS policy requiring
-//   auth.uid() = user_id, so it must be supplied explicitly in every insert.
-//   We read it from the cached session — no extra network round-trip.
+// - tasks.user_id has no database DEFAULT, so it must be supplied on INSERT.
+//   The RLS insert policy enforces auth.uid() = user_id — passing any other
+//   value would be rejected. UPDATE/SELECT policies enforce ownership via the
+//   existing row, so user_id is not needed in update payloads.
+// - task_events.user_id is NOT NULL with the same RLS requirement and must
+//   also be supplied explicitly on every insert.
+// - Both are read from the cached session — no extra network round-trip.
 
 import { supabase } from '../lib/supabase'
 import type { Task, TaskPriority, TaskStatus } from '../types/database'
@@ -36,9 +39,12 @@ export async function createTask(input: {
   priority?: TaskPriority
   due_at?: string
 }): Promise<Task> {
+  const userId = await currentUserId()
+
   const { data, error } = await supabase
     .from('tasks')
     .insert({
+      user_id: userId,
       title: input.title,
       description: input.description ?? null,
       status: 'open' as TaskStatus,
@@ -51,7 +57,6 @@ export async function createTask(input: {
 
   if (error) throw error
 
-  const userId = await currentUserId()
   await supabase.from('task_events').insert({
     user_id: userId,
     task_id: data.id,
