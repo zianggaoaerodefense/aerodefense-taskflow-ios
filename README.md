@@ -1,4 +1,4 @@
-# TaskFlow — Private CTO Workflow System
+# TaskFlow — Private daily Workflow System
 
 **Monorepo: Expo App + Supabase Backend + ChatGPT Agent**
 
