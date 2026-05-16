@@ -3,10 +3,9 @@ name: Deploy Supabase
 on:
   push:
     branches: [main]
-    paths:
-      - 'supabase/migrations/**'
-      - 'supabase/functions/**'
-      - 'supabase/config.toml'
+  pull_request:
+    branches: [main]
+    types: [closed]
   workflow_dispatch:
 
 jobs:
@@ -14,6 +13,7 @@ jobs:
     name: Push migrations & deploy Edge Functions
     runs-on: ubuntu-latest
     environment: production
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
 
     steps:
       - uses: actions/checkout@v4
