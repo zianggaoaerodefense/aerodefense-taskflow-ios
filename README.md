@@ -1,32 +1,28 @@
 # TaskFlow — Private CTO Workflow System
 
-**Monorepo: iOS App + AWS Lambda Backend + MongoDB**
+**Monorepo: iOS App + Supabase Backend + ChatGPT Agent**
 
-A private, secure task-management system that turns email, Slack, Jira, meeting notes, and GPT summaries into structured task cards with a full review-and-action workflow.
+A private, secure task-management system that turns meeting notes, GPT summaries, email, Slack, and Jira inputs into structured task cards with a full review-and-action workflow.
 
 ---
 
 ## Architecture
 
 ```
-iPhone SwiftUI App (primary UI, local cache)
-        ↕ HTTPS
-AWS API Gateway
-        ↕
-AWS Lambda (Node.js/TypeScript)
-        ↕
-MongoDB Cloud Database
+iPhone SwiftUI App (primary UI, SwiftData local cache)
+        ↕ HTTPS (Supabase anon key + user JWT, bound by RLS)
+Supabase Postgres (system of record, Row-Level Security)
+        ↕ Realtime
+iPhone SwiftUI App (auto-refresh on agent writes)
 
-GPT Management Agent
-        ↕ HTTPS
-AWS API Gateway  (same endpoint)
+ChatGPT Custom GPT (agent interface)
+        ↕ HTTPS (X-Agent-Token header)
+Supabase Edge Functions (Deno, service role key — server-side only)
         ↕
-AWS Lambda
-        ↕
-MongoDB Cloud Database
+Supabase Postgres (queries scoped to resolved user_id)
 ```
 
-**The app and GPT agent never connect to MongoDB directly. All reads/writes go through Lambda.**
+**The app and ChatGPT agent never connect to Postgres directly. All reads/writes go through the authenticated Supabase client (app) or Edge Functions (agent).**
 
 ---
 
@@ -38,37 +34,39 @@ MongoDB Cloud Database
 │   ├── TaskFlow.xcodeproj/
 │   └── TaskFlow/
 │       ├── Models/                   # SwiftData @Model classes
-│       ├── Services/                 # APIClient, SyncService, SummaryParser, etc.
-│       ├── ViewModels/               # @Observable view models
-│       ├── Views/                    # SwiftUI views (4 tabs)
+│       ├── Services/                 # SupabaseClient, AuthService, SupabaseTaskService, etc.
+│       ├── ViewModels/               # @Observable / ObservableObject view models
+│       ├── Views/                    # SwiftUI views
+│       │   └── Settings/            # ConnectAgentView, SettingsView
 │       └── Resources/               # SampleData
 │
-├── backend/                          # AWS Lambda backend
-│   ├── src/
-│   │   ├── handlers/                 # Lambda function handlers
-│   │   ├── services/                 # Audit service, business logic
-│   │   ├── db/
-│   │   │   ├── connection.ts         # MongoDB connection pooling
-│   │   │   └── repositories/        # userId-scoped data access layer
-│   │   ├── models/
-│   │   │   └── types.ts             # TypeScript interfaces
-│   │   ├── middleware/               # withAuth, requireScope
-│   │   ├── auth/                     # JWT verification, AuthContext
-│   │   ├── schemas/                  # Zod validation schemas
-│   │   └── utils/                    # response helpers, error handling
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── serverless.yml
-│   └── .env.example
+├── supabase/                         # Supabase project
+│   ├── config.toml                  # Local dev configuration
+│   ├── migrations/                   # SQL migrations (schema, RLS, indexes)
+│   └── functions/                   # Edge Functions (Deno/TypeScript)
+│       ├── _shared/                 # cors.ts, auth.ts (shared utilities)
+│       ├── agent-context/           # GET — return workflow context to ChatGPT
+│       ├── agent-write/             # POST — create summaries/tasks/messages
+│       ├── agent-update-task/       # POST — update task + insert event
+│       ├── create-agent-connection/ # POST — generate agent token (app user only)
+│       └── revoke-agent-connection/ # POST — revoke agent token (app user only)
+│
+├── packages/
+│   └── shared/                      # TypeScript types (shared across tooling)
+│       └── src/types.ts
+│
+├── backend/                          # AWS Lambda implementation (future option)
+│   └── src/                         # Preserved as reference; not the active path
 │
 ├── shared/
-│   └── schemas/                      # JSON Schema (task, summary, followup, agent)
+│   └── schemas/                      # JSON Schema definitions
 │
 ├── docs/
 │   ├── architecture.md
-│   ├── api.md
+│   ├── deployment.md
 │   ├── security.md
-│   └── deployment.md
+│   ├── chatgpt-agent-actions.md    # GPT Action OpenAPI schema + setup guide
+│   └── api.md
 │
 └── README.md
 ```
@@ -77,24 +75,30 @@ MongoDB Cloud Database
 
 ## Quick Start
 
-### Backend (local dev)
+### Supabase (local dev)
 
 ```bash
-cd backend
-npm install
-cp .env.example .env
-# Fill in MONGODB_URI and JWT_SECRET in .env
-npm run dev
+# Install Supabase CLI (macOS)
+brew install supabase/tap/supabase
+
+# Start local Postgres + Studio + Edge Function runtime
+supabase start
+
+# Apply schema migrations
+supabase db reset
+
+# Serve Edge Functions locally
+supabase functions serve --import-map supabase/functions/import_map.json
 ```
 
 ### iOS
 
-```bash
-open ios/TaskFlow.xcodeproj
-# Select iPhone simulator (iOS 17+)
-# In Settings tab, set API URL (default: http://localhost:3000 for dev)
-# Press ⌘R
-```
+1. Open `ios/TaskFlow.xcodeproj` in Xcode.
+2. Add the Supabase Swift SDK via **File → Add Package Dependencies**:
+   - URL: `https://github.com/supabase/supabase-swift` (version 2.x)
+   - Products: `Supabase`, `Realtime`
+3. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in your target's `Info.plist`.
+4. Select an iPhone simulator (iOS 17+) and press `Cmd+R`.
 
 ---
 
@@ -102,96 +106,72 @@ open ios/TaskFlow.xcodeproj
 
 | Rule | Implementation |
 |------|---------------|
-| `userId` never trusted from client | Derived from verified JWT in every handler |
-| All DB queries scoped by userId+orgId | Every repo method requires AuthContext |
-| MongoDB only from Lambda | No DB credentials in app or agent |
-| MongoDB URI in env vars | `.env` locally, AWS Secrets Manager in prod |
-| Agent tokens have explicit scopes | Scopes checked via `requireScope()` |
-| External actions require approval | `approval_requests` collection, status=pending until approved |
-| No secrets committed | `.gitignore` blocks `.env`, `*.p12`, `AuthKey_*.p8` |
-| Audit log for all mutations | `audit_events` collection via `auditService.ts` |
+| `user_id` never trusted from client | App: derived from RLS (`auth.uid()`). Agent: resolved from token hash lookup, never from body |
+| All DB queries scoped by `user_id` | RLS policies on every table enforce `auth.uid() = user_id` |
+| Postgres only via authenticated paths | App uses anon key + JWT; agent uses Edge Functions with service role |
+| Service role key never in the app | Only available inside Edge Functions as a runtime environment variable |
+| Agent tokens hashed before storage | SHA-256 hash stored; raw token returned once and never persisted |
+| RLS enabled on all user-owned tables | Enabled on all 10 tables; no DELETE policies |
+| Every task mutation emits task_events | App and agent both insert a `task_events` row on every change |
+| Audit log for agent writes and updates | `audit_logs` table; append-only; no raw content in snapshots |
+| iOS sessions stored in Keychain | Supabase Swift SDK uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` by default |
 | Face ID / Passcode on iOS | `LocalAuthentication` in `SecurityLockService.swift` |
+| No secrets committed | `.gitignore` blocks `.env`, `*.p12`, `AuthKey_*.p8` |
 
 ---
 
 ## Data Flow
 
-### User adds a task
-1. App inserts local SwiftData record (optimistic)
-2. `SyncService.pushTaskUpdate()` calls `POST /tasks`
-3. Lambda verifies token, inserts with `userId` from auth
-4. Returns `remoteId` → stored on local record (`isSynced = true`)
+### ChatGPT agent reads context
+1. GPT calls `GET /functions/v1/agent-context` with `X-Agent-Token` header.
+2. Edge Function hashes the token, looks it up in `agent_connections`, resolves `user_id`.
+3. Returns open tasks, recent events, summaries, workflows, and agent messages for that user.
 
-### GPT agent submits a work summary
-1. Agent calls `POST /agent/run-results` with agent JWT
-2. Lambda verifies agent token + scope `agent:summaries:create`
-3. Lambda inserts summaries and task candidates under correct `userId`/`orgId`
-4. App syncs → shows new items in Summaries tab (reviewNeeded flag set)
-5. User reviews task candidates, accepts selected ones
-6. Accepted tasks move to task board
+### ChatGPT agent creates a task
+1. GPT calls `POST /functions/v1/agent-write` with task details.
+2. Edge Function resolves `user_id` from token (not from request body).
+3. Inserts task with `source='agent'` and `user_id` from lookup.
+4. Inserts `task_events` row: `actor='agent'`, `event_type='created'`.
+5. iOS Realtime subscription fires → app refreshes.
 
-### Task marked Done
-1. App calls `POST /tasks/:id/mark-done`
-2. Lambda sets `doneAt`, `actualCompletionDate`, status=`done`
-3. Lambda auto-generates follow-up draft from template
-4. Draft returned to app, shown in Follow-ups tab
-5. User reviews/approves draft (status=`approved`)
-6. Phase 2: approved draft triggers `approval_request` → user confirms → external send
+### User changes a task in the app
+1. User taps "Complete" → `SupabaseTaskService.completeTask()`.
+2. Updates `tasks.status = 'done'` (RLS enforces scope).
+3. Inserts `task_events` row: `actor='user'`, `event_type='status_changed'`.
+4. Next GPT context call sees the task in `recently_completed_tasks`.
+
+### User connects the ChatGPT agent
+1. **Settings → Connect ChatGPT Agent → New Connection**.
+2. App calls `create-agent-connection` with the user's Supabase session JWT.
+3. Edge Function generates a random 32-byte token, stores its SHA-256 hash.
+4. Raw token shown once — user copies it into Custom GPT action `X-Agent-Token` header.
 
 ---
 
-## MongoDB Collections
+## Supabase Tables
 
-| Collection | Purpose |
+| Table | Purpose |
 |-----------|---------|
-| `users` | User accounts and roles |
-| `summaries` | Work summaries from all sources |
+| `profiles` | User display name and role |
+| `workflows` | Named workflow definitions |
+| `workflow_runs` | Individual workflow executions |
+| `summaries` | Work summaries from agent or user |
 | `tasks` | Task cards (system of record) |
-| `followup_drafts` | Generated follow-up drafts |
-| `source_refs` | External source metadata (Slack threads, Jira tickets) |
-| `agent_runs` | Agent run metadata and status |
-| `approval_requests` | Pending external actions awaiting user approval |
-| `audit_events` | Immutable audit trail for all mutations |
-| `sync_events` | iOS/backend sync state tracking |
-
----
-
-## API Overview
-
-Full docs: `docs/api.md`
-
-| Group | Endpoints |
-|-------|----------|
-| Health/Auth | `GET /health`, `GET /me` |
-| Summaries | `GET/POST /summaries`, `GET/PATCH /summaries/:id`, `/accept-tasks`, `/archive` |
-| Tasks | `GET/POST /tasks`, `GET/PATCH /tasks/:id`, `/mark-reviewed`, `/mark-action-needed`, `/mark-waiting`, `/mark-done`, `/archive` |
-| Follow-ups | `GET/POST /followups`, `GET/PATCH /followups/:id`, `/mark-reviewed`, `/approve`, `/archive` |
-| Approvals | `GET/POST /approval-requests`, `/:id/approve`, `/:id/reject`, `/:id/mark-executed` |
-| Agent | `POST /agent/run-results`, `GET /agent/pending-review`, `GET /agent/changes`, `POST /agent/followup-drafts`, `POST /agent/approval-requests` |
-| Audit | `GET /audit-events` |
-
-### Agent scopes
-```
-agent:summaries:create
-agent:tasks:read
-agent:tasks:suggest
-agent:followups:draft
-agent:approvals:create
-```
-
-The agent cannot send externally. All external actions go through `approval_requests`.
+| `task_events` | Append-only mutation log per task |
+| `agent_messages` | Structured messages from the agent |
+| `agent_connections` | Hashed agent tokens, one per user-GPT pairing |
+| `integration_connections` | External integration links (Gmail, Slack, Jira) |
+| `audit_logs` | Append-only audit trail for agent writes and task updates |
 
 ---
 
 ## Task Status Flow
 
 ```
-new → reviewNeeded → actionNeeded → done → archived
-             ↓                ↓
-           waiting          waiting
+open → in_progress → done → archived
+         ↓
+       waiting (snoozed)
 ```
-
-Status colors: new=blue, reviewNeeded=purple, actionNeeded=orange, waiting=yellow, done=green, archived=gray
 
 ---
 
@@ -200,18 +180,18 @@ Status colors: new=blue, reviewNeeded=purple, actionNeeded=orange, waiting=yello
 | Feature | Phase |
 |---------|-------|
 | Local SwiftData cache | ✅ Phase 1 |
-| AWS Lambda + MongoDB backend | ✅ Phase 2 (current) |
 | Face ID lock | ✅ Phase 1 |
 | JSON export/import (debug only) | ✅ Phase 1 |
-| API sync (backend as source of truth) | ✅ Phase 2 (current) |
-| Agent handoff via `/agent/run-results` | ✅ Phase 2 (current) |
+| Supabase Postgres schema + RLS | ✅ Phase 2 (current) |
+| Supabase Auth in iOS app | ✅ Phase 2 (current) |
+| Supabase Edge Functions for agent | ✅ Phase 2 (current) |
+| ChatGPT agent connection UI | ✅ Phase 2 (current) |
+| Supabase Realtime task refresh | ✅ Phase 2 (current) |
 | Gmail integration (read + draft) | Phase 3 |
 | Slack integration (read + draft) | Phase 3 |
 | Jira integration (read + comment) | Phase 3 |
-| Email send via approval | Phase 3 |
-| Slack send via approval | Phase 3 |
+| Email/Slack send via approval | Phase 3 |
 | Push notifications | Phase 3 |
-| iCloud sync | Phase 3 |
 | TestFlight distribution | Phase 3 |
 | App Store | Not planned |
 
@@ -221,12 +201,9 @@ Status colors: new=blue, reviewNeeded=purple, actionNeeded=orange, waiting=yello
 
 - No automatic external sending (email, Slack, Jira) — approval required
 - No public App Store release
-- No direct MongoDB access from iOS app
-- No direct MongoDB access from GPT agent
-- No committed secrets
+- No direct Postgres access from iOS app or ChatGPT agent
+- No committed secrets (service role key, API keys, tokens)
 - No analytics
-- No Supabase/Vercel
-- No ChatGPT memory as database
 
 ---
 
@@ -237,6 +214,6 @@ See `docs/security.md` for full details.
 **Never commit:**
 - `.env` files
 - `*.p12` / `*.mobileprovision` / `AuthKey_*.p8`
-- MongoDB credentials
-- JWT secrets
+- Supabase service role key
+- Agent connection tokens
 - Exported task data JSON files (`taskflow-export*.json`)

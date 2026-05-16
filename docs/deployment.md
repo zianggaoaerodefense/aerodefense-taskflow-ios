@@ -4,101 +4,139 @@
 
 ## Local Development
 
-### Backend
+### Prerequisites
 
-**Prerequisites:** Node.js 20+, npm.
+- [Supabase CLI](https://supabase.com/docs/guides/cli) (`brew install supabase/tap/supabase` or `npm i -g supabase`)
+- Docker (required by Supabase CLI for local Postgres + Studio)
+- Node.js 20+ (for `packages/shared`)
+- Xcode 15+, iOS 17 simulator or device, macOS 14+
+
+### Start local Supabase stack
 
 ```bash
-cd backend
-npm install
-cp .env.example .env
-# Edit .env — fill in MONGODB_URI and JWT_SECRET at minimum
-npm run dev
+supabase start
 ```
 
-The backend starts an offline Serverless emulator (via `serverless-offline`) listening on `http://localhost:3000`.
+This starts a local Postgres instance, Supabase Studio (http://localhost:54323), and the Edge Function runtime. The first run takes a few minutes to pull Docker images.
 
-Environment variables required for local dev (see `.env.example`):
+The CLI prints the local credentials when it starts:
 
-| Variable | Description |
-|---|---|
-| `MONGODB_URI` | MongoDB Atlas connection string. Use a dedicated dev cluster or a local `mongod` instance. Never use the production URI locally. |
-| `JWT_SECRET` | Secret for signing/verifying user JWTs. Use a long random string (32+ chars). |
-| `AGENT_JWT_SECRET` | Secret for signing/verifying agent JWTs. Must be different from `JWT_SECRET`. |
-| `NODE_ENV` | Set to `development` for local dev. |
-| `ALLOWED_ORIGINS` | CORS allowed origin, e.g., `http://localhost:3000`. |
+```
+API URL:       http://127.0.0.1:54321
+anon key:      eyJ...
+service_role:  eyJ...
+DB URL:        postgresql://postgres:postgres@127.0.0.1:54322/postgres
+Studio:        http://127.0.0.1:54323
+```
 
-**Do not commit `.env`.** The `.gitignore` already excludes it.
+**Never commit these local credentials.** They are ephemeral and change on each `supabase start`.
+
+### Apply migrations
+
+```bash
+supabase db reset
+```
+
+This drops and recreates the local database, then applies all migrations in `supabase/migrations/` in order. Run this after adding a new migration file.
+
+### Run Edge Functions locally
+
+```bash
+supabase functions serve --import-map supabase/functions/import_map.json
+```
+
+Functions are served at `http://localhost:54321/functions/v1/<function-name>`.
+
+To test a function with the local service role key:
+
+```bash
+curl -X GET http://localhost:54321/functions/v1/agent-context \
+  -H "X-Agent-Token: <your-test-token>"
+```
 
 ### iOS app (local dev)
 
-**Prerequisites:** Xcode 15+, iOS 17 simulator or device, macOS 14+.
-
 1. Open `ios/TaskFlow.xcodeproj` in Xcode.
-2. Select a simulator target (iPhone 15, iOS 17+).
-3. Run the app (`Cmd+R`).
-4. In the app, go to **Settings** and set the API Base URL to `http://localhost:3000` (or your staging URL).
-5. Log in with a test account. The token is stored and used for all subsequent API calls.
+2. Add the Supabase Swift SDK via Swift Package Manager:
+   - **File → Add Package Dependencies**
+   - URL: `https://github.com/supabase/supabase-swift`
+   - Version: Up to Next Major (2.x)
+   - Products: `Supabase`, `Realtime`
+3. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to your target's `Info.plist`:
+   - `SUPABASE_URL` → `http://127.0.0.1:54321` (local dev) or your project URL (staging/prod)
+   - `SUPABASE_ANON_KEY` → the local anon key printed by `supabase start`
+4. Select a simulator target (iPhone 15, iOS 17+) and press `Cmd+R`.
 
-For device builds, the simulator URL will not work — point to a network-accessible staging environment.
+For device builds, use a staging environment URL (the local `127.0.0.1` address is not reachable from a physical device on a different network).
 
 ---
 
-## AWS Deployment
+## Supabase Project Setup (Staging / Production)
 
-### Prerequisites
+### Create a project
 
-- AWS CLI configured with appropriate credentials (IAM user or assumed role with Lambda, API Gateway, CloudFormation, IAM, and Secrets Manager permissions).
-- Serverless Framework v3: `npm install -g serverless`
-- Node.js 20+
+1. Log in at [supabase.com](https://supabase.com).
+2. Create a new project. Choose a region close to your users.
+3. Note the **Project URL** and **anon key** from **Settings → API**.
+4. Never share or commit the **service role key**.
 
-### Deploy to production
-
-```bash
-cd backend
-npm install
-sls deploy --stage prod
-```
-
-Serverless Framework will:
-1. Compile TypeScript to JavaScript.
-2. Package the Lambda bundle.
-3. Create/update a CloudFormation stack (`taskflow-backend-prod`).
-4. Deploy all functions defined in `serverless.yml` behind API Gateway HTTP API.
-
-The deployed API Gateway endpoint URL is printed at the end of the deploy output. Copy this URL into your iOS build configuration as the production API base URL.
-
-### Environment variables in production
-
-**Do not pass secrets on the command line.** Inject them via AWS Systems Manager Parameter Store or Secrets Manager.
-
-Recommended approach (SSM Parameter Store):
+### Link the CLI to your project
 
 ```bash
-aws ssm put-parameter \
-  --name "/taskflow/prod/MONGODB_URI" \
-  --value "mongodb+srv://..." \
-  --type SecureString \
-  --key-id alias/aws/ssm
-
-aws ssm put-parameter \
-  --name "/taskflow/prod/JWT_SECRET" \
-  --value "your-long-random-secret" \
-  --type SecureString
-
-aws ssm put-parameter \
-  --name "/taskflow/prod/AGENT_JWT_SECRET" \
-  --value "your-long-random-agent-secret" \
-  --type SecureString
+supabase link --project-ref <your-project-ref>
 ```
 
-Reference these in `serverless.yml` using `${ssm:/taskflow/prod/MONGODB_URI}` syntax, or configure the Lambda function environment variables in the AWS Console after deploy.
+### Push migrations to the remote database
 
-The Lambda execution role already has `secretsmanager:GetSecretValue` on `arn:aws:secretsmanager:*:*:secret:taskflow/*` (see `serverless.yml`). Secrets Manager can also be used in place of or alongside SSM.
+```bash
+supabase db push
+```
 
-### Staging vs production
+This applies all migrations in `supabase/migrations/` to the remote Postgres instance.
 
-Keep staging and production as completely separate Serverless stacks (`--stage staging` vs `--stage prod`), with separate MongoDB Atlas clusters and separate secret values. Never share a `MONGODB_URI` or `JWT_SECRET` between environments.
+### Deploy Edge Functions
+
+```bash
+supabase functions deploy agent-context
+supabase functions deploy agent-write
+supabase functions deploy agent-update-task
+supabase functions deploy create-agent-connection
+supabase functions deploy revoke-agent-connection
+```
+
+Or deploy all at once:
+
+```bash
+supabase functions deploy
+```
+
+### Set Edge Function secrets
+
+The service role key is automatically available inside Edge Functions as `SUPABASE_SERVICE_ROLE_KEY`. No manual configuration is needed for that.
+
+For any additional secrets (future integrations, webhook keys, etc.):
+
+```bash
+supabase secrets set MY_SECRET_KEY=<value>
+```
+
+**Do not put secrets in `import_map.json`, source files, or environment files committed to the repo.**
+
+---
+
+## Staging vs Production
+
+Keep staging and production as completely separate Supabase projects. Never share a project URL, anon key, or service role key between environments.
+
+| Item | Staging | Production |
+|---|---|---|
+| Project | `taskflow-staging` | `taskflow-prod` |
+| Migrations | Applied from same repo | Applied from same repo |
+| iOS build | Points to staging URL | Points to prod URL |
+| Secrets | Staging values | Production values |
+| Agent tokens | Separate tokens per user | Separate tokens per user |
+
+Use Xcode build configurations (Debug/Release) or xcconfig files to switch between staging and production URLs without changing `Info.plist` manually.
 
 ---
 
@@ -106,14 +144,13 @@ Keep staging and production as completely separate Serverless stacks (`--stage s
 
 1. Open `ios/TaskFlow.xcodeproj`.
 2. Select your development team in **Signing & Capabilities**.
-3. Choose a simulator or connected device.
-4. Set the API Base URL in the Settings screen of the running app (or via a build scheme environment variable if you add that support).
-5. Build and run (`Cmd+R`).
+3. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in your active scheme's build settings or a `.xcconfig` file.
+4. Choose a simulator or connected device and press `Cmd+R`.
 
-For an ad-hoc distribution (e.g., sharing with testers over the air):
+For an ad-hoc distribution:
 - Archive the app in Xcode (**Product > Archive**).
 - Export with **Ad Hoc** distribution.
-- Share the `.ipa` and install via Apple Configurator or a distribution link.
+- Share the `.ipa` via Apple Configurator or a distribution link.
 
 ---
 
@@ -126,11 +163,11 @@ For an ad-hoc distribution (e.g., sharing with testers over the air):
 
 ### Sensitive files — never commit
 
-The following files must never be committed to the repository:
-
-- `*.p12` — distribution certificate + private key
-- `*.mobileprovision` — provisioning profile
-- `AuthKey_*.p8` — App Store Connect API key
+| File | Reason |
+|---|---|
+| `*.p12` | Distribution certificate + private key |
+| `*.mobileprovision` | Provisioning profile |
+| `AuthKey_*.p8` | App Store Connect API key |
 
 Store these in your CI/CD secret store only.
 
@@ -138,97 +175,57 @@ Store these in your CI/CD secret store only.
 
 **Option A: Codemagic**
 1. Connect the GitHub repository to Codemagic.
-2. Add `MONGODB_URI` (backend) and `JWT_SECRET` as environment variables in the Codemagic Environment Variables section (mark as secret).
+2. Add `SUPABASE_URL` (staging/prod) and `SUPABASE_ANON_KEY` as environment variables (mark as secret).
 3. Add the `.p12` and `AuthKey_*.p8` as file environment variables.
 4. Configure the Codemagic workflow to build, sign, and upload to TestFlight.
 
 **Option B: GitHub Actions + Fastlane**
-1. Add secrets to the GitHub repository: `APPLE_DEVELOPER_CERT_BASE64`, `APPLE_PROVISIONING_PROFILE_BASE64`, `APP_STORE_CONNECT_API_KEY_BASE64`, `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`.
+1. Add secrets to the GitHub repository: `APPLE_DEVELOPER_CERT_BASE64`, `APPLE_PROVISIONING_PROFILE_BASE64`, `APP_STORE_CONNECT_API_KEY_BASE64`, `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
 2. Write a `Fastfile` with a `beta` lane that calls `build_app` and `upload_to_testflight`.
 3. Trigger the workflow on push to `main` or a release tag.
 
 **Option C: Xcode Cloud**
 1. Connect the repository in Xcode's Xcode Cloud settings.
-2. Configure a workflow: build on push to `main`, sign with your distribution certificate, and upload to TestFlight automatically.
-3. Secrets and certificates are managed by Xcode Cloud — no local files needed.
-
-### App Store Connect API key rotation
-
-Rotate the `AuthKey_*.p8` key in App Store Connect if it is ever exposed. Update the secret in your CI store immediately after generating the new key.
+2. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` as environment variables in the workflow.
+3. Configure: build on push to `main`, sign, upload to TestFlight automatically.
 
 ---
 
-## MongoDB Setup
+## Environment Variables Reference
 
-### Atlas cluster
+### Edge Functions (set as Supabase secrets)
 
-1. Log in to MongoDB Atlas.
-2. Create a new cluster for production (M10 or larger; avoid free-tier M0 for production workloads).
-3. Create a separate cluster for staging.
+| Variable | Set by | Description |
+|---|---|---|
+| `SUPABASE_URL` | Automatic | Injected by Supabase runtime |
+| `SUPABASE_ANON_KEY` | Automatic | Injected by Supabase runtime |
+| `SUPABASE_SERVICE_ROLE_KEY` | Automatic | Injected by Supabase runtime |
 
-### Database and collections
+Additional secrets for future integrations (Gmail, Slack, Jira OAuth credentials) are set with `supabase secrets set`.
 
-1. Create a database named `taskflow`.
-2. Collections are created automatically on first write by the application. To create them explicitly (recommended for production):
+### iOS App (Info.plist via xcconfig)
 
-```js
-use taskflow
-db.createCollection("tasks")
-db.createCollection("summaries")
-db.createCollection("followupDrafts")
-db.createCollection("approvalRequests")
-db.createCollection("auditEvents")
-db.createCollection("agentRuns")
-db.createCollection("sourceRefs")
-db.createCollection("users")
-db.createCollection("sessions")
-```
+| Key | Value | Notes |
+|---|---|---|
+| `SUPABASE_URL` | `https://<ref>.supabase.co` | Not a secret; safe to embed |
+| `SUPABASE_ANON_KEY` | `eyJ...` | Not a secret; restricted by RLS |
 
-### Least-privilege database user
+**Never add the service role key to Info.plist or any file in the app bundle.**
 
-Create a dedicated Atlas database user for the application:
+---
 
-- **Username:** `taskflow-app` (or similar)
-- **Password:** strong random string, stored in Secrets Manager
-- **Role:** `readWrite` on the `taskflow` database only — no `admin`, no `clusterMonitor`
-- **Authentication:** SCRAM-SHA-256
+## Supabase Realtime
 
-Example Atlas CLI command:
-```bash
-atlas dbusers create \
-  --username taskflow-app \
-  --password <generated-password> \
-  --role readWrite@taskflow \
-  --projectId <your-project-id>
-```
+Realtime is enabled by default in `supabase/config.toml`. No additional configuration is required for the iOS app's Realtime subscriptions to work. Ensure the Realtime service is not disabled in the Supabase dashboard for your project.
 
-### Audit collection permissions
+---
 
-The `auditEvents` collection should be append-only from the application's perspective. Consider creating a second, more restricted role that has `insert` but not `update` or `delete` on `auditEvents` only, and use that role for the Lambda function.
+## Alternative Architecture (AWS Lambda + MongoDB)
 
-### IP allowlist
+The `backend/` directory contains the original AWS Lambda + MongoDB Atlas implementation. Deployment instructions for that path:
 
-Add only the AWS Lambda outbound IPs (or your VPC NAT gateway IP) to the Atlas IP allowlist. Do not use `0.0.0.0/0` (open to the internet).
+- Install Serverless Framework: `npm install -g serverless`
+- Configure `MONGODB_URI`, `JWT_SECRET`, `AGENT_JWT_SECRET` in AWS Secrets Manager under `/taskflow/prod/`
+- Deploy: `cd backend && sls deploy --stage prod`
 
-For VPC-based Lambda:
-- Deploy Lambda inside a VPC with a NAT gateway.
-- Add the NAT gateway's Elastic IP to the Atlas allowlist.
-
-For non-VPC Lambda (current `serverless.yml` configuration):
-- Use the AWS IP ranges for `us-east-1` Lambda (periodically rotated — consider a VPC NAT for stability).
-- Alternatively, configure Atlas Private Endpoint (AWS PrivateLink) for a fixed, private connection.
-
-### Indexes
-
-Recommended indexes for performance and correctness (run once after cluster creation):
-
-```js
-use taskflow
-db.tasks.createIndex({ userId: 1, orgId: 1, status: 1 })
-db.tasks.createIndex({ userId: 1, orgId: 1, updatedAt: -1 })
-db.summaries.createIndex({ userId: 1, orgId: 1, createdAt: -1 })
-db.followupDrafts.createIndex({ userId: 1, orgId: 1, status: 1 })
-db.approvalRequests.createIndex({ userId: 1, orgId: 1, status: 1 })
-db.auditEvents.createIndex({ orgId: 1, createdAt: -1 })
-db.auditEvents.createIndex({ entityType: 1, entityId: 1 })
-```
+This is not the active MVP path. See `docs/architecture.md` for details on when this alternative might be relevant.

@@ -5,21 +5,22 @@
 TaskFlow is a three-layer system:
 
 1. **iPhone SwiftUI app** — primary UI, local SwiftData cache for offline access and fast rendering
-2. **AWS Lambda + API Gateway (HTTP API)** — stateless backend, system of record, enforces all authorization
-3. **MongoDB Atlas** — cloud database, single `taskflow` database, accessible only from Lambda
+2. **Supabase** — hosted Postgres database, Auth, Row-Level Security, Edge Functions, Realtime
+3. **ChatGPT Custom GPT** — agent interface that reads and writes through Edge Functions only
 
-The iOS app never talks to MongoDB directly. All state mutations go through the Lambda API, which verifies identity, enforces org-level isolation, and writes to MongoDB.
+The iOS app never talks to the Postgres database directly. The ChatGPT agent never talks to the database directly. All reads and writes that originate from the agent go through Supabase Edge Functions, which verify the agent token and derive the user identity server-side.
 
 ---
 
 ## Security Principles
 
-- **userId is never trusted from the client body.** The `userId` and `orgId` placed on every document are always extracted from the verified JWT in the `Authorization: Bearer` header. Client-supplied `userId` fields in request bodies are silently ignored.
-- **All queries are scoped by `userId` AND `orgId`.** Every MongoDB query in the repository layer includes both fields as mandatory filters. A valid token for org A cannot read data belonging to org B.
-- **MongoDB is only reachable from Lambda.** The Atlas cluster IP allowlist contains only the Lambda VPC NAT gateway IPs (or Lambda IP ranges). No direct access from the internet or from the iOS app.
-- **No secrets in code.** `MONGODB_URI`, `JWT_SECRET`, and `AGENT_JWT_SECRET` are injected at deploy time via environment variables sourced from AWS Systems Manager Parameter Store / Secrets Manager. The `.env.example` file contains placeholder values only and is the only `.env` file committed.
-- **Agent tokens have explicit scopes.** Agent JWTs are signed with a separate secret (`AGENT_JWT_SECRET`) and must declare scopes (e.g., `agent:summaries:create`). A leaked user token cannot be used on agent-only endpoints, and vice-versa. Missing scopes are not granted implicitly.
-- **External actions require explicit user approval.** The agent may propose follow-up drafts and approval requests, but no email, Slack message, or Jira comment is sent until the user approves through the iOS app. This approval is recorded with a timestamp in the `approvalRequests` collection.
+- **`user_id` is never trusted from the client or agent body.** The `user_id` written to any row is always derived from the authenticated Supabase session JWT (for app users) or looked up from the agent token hash (for the ChatGPT agent). Client-supplied `user_id` fields are silently ignored.
+- **All queries are scoped by `user_id`.** Every Postgres query in the RLS policies includes `auth.uid() = user_id` as a mandatory filter. A valid token for user A cannot read data belonging to user B.
+- **Postgres is only reachable via Supabase's managed access paths.** The iOS app uses the anon key + authenticated JWT (bound by RLS). Edge Functions use the service role key (server-side only, bypasses RLS with explicit ownership checks). No raw Postgres connection string is ever in the app or agent.
+- **No secrets in code.** The Supabase service role key exists only as a Supabase project secret injected into Edge Functions at runtime. The iOS app contains only the anon key (safe for client-side use; restricted by RLS) and the project URL.
+- **Agent tokens have explicit ownership.** Agent JWTs are not used. Instead, a connection token is generated per-user in the iOS app, stored as a SHA-256 hash in `agent_connections`, and passed as the `X-Agent-Token` header. The raw token is shown once and never stored.
+- **External actions require explicit user approval.** The agent may propose tasks and summaries, but no external send (email, Slack, Jira) occurs without user approval through the iOS app.
+- **Row-Level Security is enabled on all user-owned tables.** Policies ensure `auth.uid() = user_id` for all SELECT, INSERT, and UPDATE operations. Edge Functions using the service role key perform explicit ownership checks in application code.
 
 ---
 
@@ -29,81 +30,128 @@ The iOS app never talks to MongoDB directly. All state mutations go through the 
 
 ```
 iPhone app
-  → GET /tasks (Bearer user JWT)
-  → Lambda: verifyUserToken → extract userId + orgId from JWT
-  → Lambda: taskRepo.list({ userId, orgId, ... })
-  → MongoDB: db.tasks.find({ userId, orgId })
-  → Lambda: serialise DTOs (ObjectId → string, Date → ISO-8601)
-  → iPhone app: upsert into SwiftData local cache
-  → SwiftUI renders from cache
+  → Supabase anon client + authenticated JWT
+  → RLS: auth.uid() = user_id filters all results
+  → tasks / summaries / workflows returned
+  → SwiftUI renders; Realtime subscription detects changes
 ```
 
-### Agent run
+### ChatGPT agent reads context
 
 ```
-GPT management agent
-  → POST /agent/run-results (Bearer agent JWT)
-  → Lambda: verifyAgentToken → extract userId + orgId + agentId + scopes
-  → Lambda: requireScope(auth, 'agent:summaries:create')
-  → Lambda: store summaries + task candidates under correct userId/orgId
-  → Lambda: create AgentRunDoc for audit
-  → iPhone app: next sync pulls new summaries
-  → User reviews task candidates, taps Accept
-  → POST /summaries/{id}/accept-tasks
-  → Lambda: promotes candidates to real TaskDoc entries
+ChatGPT Custom GPT
+  → GET /functions/v1/agent-context (X-Agent-Token header)
+  → Edge Function: hash token → lookup agent_connections → resolve user_id
+  → Query tasks, summaries, workflows, task_events for that user_id
+  → Return JSON context to GPT
 ```
 
-### Task completion and follow-up
+### ChatGPT agent creates tasks
 
 ```
-User marks task done in iOS app
-  → POST /tasks/{id}/mark-done (Bearer user JWT)
-  → Lambda: sets status=done, doneAt=now
-  → Lambda: agent (or system) creates FollowUpDraftDoc (status=draft)
-  → iPhone app: SyncService pulls new draft
-  → User reviews draft body and recipient
-  → User taps Approve
-  → POST /followups/{id}/approve (Bearer user JWT)
-  → Lambda: sets status=approved, approvedAt=now
-  → Phase 2: ApprovalRequest executed → external message sent
+GPT decision: create task
+  → POST /functions/v1/agent-write { tasks: [...] }
+  → Edge Function: authenticate token → derive user_id (not from body)
+  → Insert tasks with user_id = resolved user_id, source = 'agent'
+  → Insert task_events rows (actor='agent') for each created task
+  → Insert audit_logs row
+  → iOS Realtime subscription fires → app refreshes task list
+```
+
+### ChatGPT agent updates a task
+
+```
+GPT decision: mark task done
+  → POST /functions/v1/agent-update-task { task_id: "...", status: "done" }
+  → Edge Function: authenticate → verify task.user_id == resolved user_id
+  → Update task row
+  → Insert task_events row (actor='agent', event_type='status_changed')
+  → Insert audit_logs row
+  → iOS Realtime triggers refresh
+```
+
+### User changes a task in the app
+
+```
+User taps "Complete" on a task
+  → SupabaseTaskService.completeTask()
+  → UPDATE tasks SET status='done' (RLS enforces user scope)
+  → INSERT task_events (actor='user', event_type='status_changed')
+  → Next GPT context call sees the change in recently_completed_tasks
+```
+
+### User generates an agent connection token
+
+```
+User: Settings → Connect ChatGPT Agent → New Connection
+  → App calls POST /functions/v1/create-agent-connection (app JWT)
+  → Edge Function: generate 32-byte random token
+  → Store SHA-256(token) in agent_connections
+  → Return raw token once (never stored)
+  → User pastes token into Custom GPT action header configuration
 ```
 
 ---
 
-## MongoDB Collections
+## Supabase Tables
 
-The backend uses a single `taskflow` database containing the following nine collections:
-
-| Collection | Description |
+| Table | Description |
 |---|---|
-| `tasks` | Core task documents. Each task is owned by a `userId` + `orgId` pair. Tracks the full lifecycle from `new` through `done`/`archived`. |
-| `summaries` | Summaries produced by the agent or entered manually. Hold structured extraction, task candidates, and links to accepted tasks. |
-| `followupDrafts` | Draft follow-up messages (email, Slack, Jira comment). Created on task completion; require explicit user approval before any external send. |
-| `approvalRequests` | Records of pending and executed approval actions. Provides an auditable gate before any external side-effect is performed. |
-| `auditEvents` | Append-only log of all mutations. Every create/update/approve action writes a sanitised before/after snapshot. |
-| `agentRuns` | One document per agent run. Records run type, sources checked, summaries created, tasks created, and final status. |
-| `sourceRefs` | Raw content fetched from external sources (email bodies, Slack threads). Stored as sensitive data; not logged or exposed in list endpoints. |
-| `users` | User profile and role information. `userId` and `orgId` are the primary identity fields on all cross-collection references. |
-| `sessions` | (Reserved for Phase 2) Refresh token tracking and device session management. |
+| `profiles` | One row per auth.users entry. Created automatically on signup via trigger. |
+| `workflows` | Named workflow definitions owned by a user. |
+| `workflow_runs` | Individual execution records for a workflow. |
+| `summaries` | Text summaries created by the agent or user. Source of record for analysis output. |
+| `tasks` | Core task cards. Status flows: open → in_progress → waiting → done → archived. |
+| `task_events` | Append-only event log for every task mutation. One row per change. |
+| `agent_messages` | Structured messages the agent writes for the user's context. |
+| `agent_connections` | Hashed agent connection tokens. Raw token never stored. |
+| `integration_connections` | External integration links (Gmail, Slack, Jira). OAuth tokens stored in Supabase Vault, not here. |
+| `audit_logs` | Append-only audit trail of all agent writes and task updates. Readable by the owning user. |
+
+All tables have Row-Level Security enabled with `user_id`-scoped policies.
 
 ---
 
-## Agent Integration
+## Edge Functions
 
-The GPT management agent is an external process that communicates with TaskFlow exclusively through the Lambda API. It has **no direct database access**.
+All Edge Functions are deployed to Supabase and run in Deno. The service role key is available as an environment variable at runtime and is never exposed outside the function sandbox.
 
-**Authentication:** The agent presents a JWT signed with `AGENT_JWT_SECRET` (distinct from the user JWT secret). The token payload contains `userId`, `orgId`, `agentId`, and an explicit `scopes` array.
-
-**Agent-specific endpoints:**
-
-| Method | Path | Required scope | Purpose |
+| Function | Caller | Auth method | Purpose |
 |---|---|---|---|
-| `POST` | `/agent/run-results` | `agent:summaries:create` | Submit summaries and task candidates after a run |
-| `GET` | `/agent/pending-review` | `agent:tasks:read` | Fetch tasks awaiting user review |
-| `GET` | `/agent/changes` | `agent:tasks:read` | Fetch tasks updated since a given timestamp |
-| `POST` | `/agent/followup-drafts` | `agent:drafts:create` | Create follow-up draft proposals |
-| `POST` | `/agent/approval-requests` | `agent:approvals:create` | Propose approval requests for external actions |
+| `create-agent-connection` | iOS app | Supabase JWT (anon client) | Generate a new agent connection token |
+| `revoke-agent-connection` | iOS app | Supabase JWT (anon client) | Revoke an existing agent connection |
+| `agent-context` | ChatGPT GPT | `X-Agent-Token` | Return current workflow context |
+| `agent-write` | ChatGPT GPT | `X-Agent-Token` | Write summaries, tasks, messages |
+| `agent-update-task` | ChatGPT GPT | `X-Agent-Token` | Update a task and record the event |
 
-**Data ownership:** All documents created through agent endpoints are stamped with the `userId` and `orgId` from the verified agent JWT, not from request body fields.
+---
 
-**Approval gate:** The agent never sends external messages directly. It creates `FollowUpDraftDoc` and `ApprovalRequestDoc` entries; the user must approve each one through the iOS app before any external action occurs.
+## iOS App Integration
+
+The iOS app uses the Supabase Swift SDK with the anon key. Sessions are stored in Keychain by the SDK. The app:
+
+- Signs in users with Supabase Auth (email/password)
+- Reads tasks, summaries, and workflows using authenticated queries (bound by RLS)
+- Writes task mutations via `SupabaseTaskService`, which always also inserts a `task_events` row
+- Calls Edge Functions directly for agent connection management (passing the session JWT)
+- Subscribes to Realtime changes on `tasks` and `summaries` to refresh when the agent writes
+
+The service role key is never present in the app.
+
+---
+
+## Realtime
+
+Supabase Realtime is enabled on the `tasks` and `summaries` tables. The iOS app subscribes to `postgres_changes` events. When the ChatGPT agent inserts a task via `agent-write`, the Realtime event fires and the app refreshes automatically.
+
+---
+
+## Alternative Architecture (Future Option)
+
+The `backend/` directory contains an AWS Lambda + MongoDB Atlas implementation. This was the original MVP design and is preserved as a reference. It is not the active production path. If scale requirements grow beyond Supabase's limits, migrating the Edge Functions to AWS Lambda (using the same RLS-equivalent logic) and the database to MongoDB Atlas or Aurora Postgres is a viable path.
+
+Key differences from the Supabase MVP:
+- Lambda requires VPC + NAT gateway for MongoDB Atlas IP allowlisting
+- MongoDB replaces Postgres; the data model would need adapting
+- Agent token auth logic would move to a Lambda middleware
+- No managed Realtime — would require WebSocket infrastructure or polling
