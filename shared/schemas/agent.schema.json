@@ -1,0 +1,182 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://taskflow.internal/schemas/agent.schema.json",
+  "title": "AgentRunResultsPayload",
+  "description": "Request body for POST /agent/run-results. Submitted by the management agent after completing a scheduled or manual run. Requires an agent JWT with scope agent:summaries:create.",
+  "type": "object",
+  "required": ["runType", "sourcesChecked", "summaries"],
+  "additionalProperties": false,
+  "$defs": {
+    "AgentSummary": {
+      "$id": "#/$defs/AgentSummary",
+      "title": "AgentSummary",
+      "description": "A single summary produced by the agent during a run. The server stores this as a SummaryDoc under the userId/orgId from the verified agent JWT.",
+      "type": "object",
+      "required": ["title", "sourceType", "rawText", "structured", "tags", "suggestedPriority", "reviewNeeded", "actionNeeded", "taskCandidates"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable title for the summary."
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["agent", "email", "slack", "jira", "manual", "import", "sample"],
+          "description": "Source channel the summary was derived from."
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "External identifiers (message IDs, email IDs) for the source documents."
+        },
+        "rawText": {
+          "type": "string",
+          "description": "Unprocessed source text used to generate this summary. Treat as potentially sensitive."
+        },
+        "structured": {
+          "type": "object",
+          "description": "Structured data extracted from the raw text.",
+          "required": ["risks", "dependencies", "sections"],
+          "additionalProperties": false,
+          "properties": {
+            "requester": { "type": "string" },
+            "requesterContact": { "type": "string" },
+            "mainAsk": { "type": "string" },
+            "deadline": { "type": "string" },
+            "risks": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "dependencies": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "sections": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AgentSummarySection" }
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Categorisation tags applied by the agent."
+        },
+        "suggestedPriority": {
+          "type": "string",
+          "enum": ["low", "normal", "high", "urgent"],
+          "description": "Priority level the agent recommends for tasks derived from this summary."
+        },
+        "reviewNeeded": {
+          "type": "boolean",
+          "description": "Whether the agent believes the user should review before acting."
+        },
+        "actionNeeded": {
+          "type": "boolean",
+          "description": "Whether the agent has identified concrete action items."
+        },
+        "taskCandidates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TaskCandidate" },
+          "description": "Task candidates proposed by the agent. These are stored but not created as Task documents until the user accepts them."
+        }
+      }
+    },
+    "AgentSummarySection": {
+      "$id": "#/$defs/AgentSummarySection",
+      "title": "AgentSummarySection",
+      "description": "A structured section within an agent-produced summary.",
+      "type": "object",
+      "required": ["id", "heading", "body", "extractedBullets"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Agent-assigned stable section identifier."
+        },
+        "heading": {
+          "type": "string",
+          "description": "Section heading."
+        },
+        "body": {
+          "type": "string",
+          "description": "Full prose body of the section."
+        },
+        "extractedBullets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Bullet points extracted from the section body."
+        }
+      }
+    },
+    "TaskCandidate": {
+      "$id": "#/$defs/TaskCandidate",
+      "title": "TaskCandidate",
+      "description": "A proposed task that the agent believes should be created. Stored on the Summary document; only promoted to a real Task when the user accepts it via POST /summaries/{id}/accept-tasks.",
+      "type": "object",
+      "required": ["title", "priority", "resourceType"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Proposed task title."
+        },
+        "details": {
+          "type": "string",
+          "description": "Extended description for the proposed task."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "normal", "high", "urgent"],
+          "description": "Agent-suggested priority."
+        },
+        "resourceType": {
+          "type": "string",
+          "enum": ["email", "slack", "jira", "github", "document", "other"],
+          "description": "Channel or system the request originated from."
+        },
+        "requesterName": {
+          "type": "string",
+          "description": "Name of the requester, if identified."
+        },
+        "requesterContact": {
+          "type": "string",
+          "description": "Contact info for the requester, if identified."
+        },
+        "resourceLabel": {
+          "type": "string",
+          "description": "Human-readable label for the source resource."
+        },
+        "resourceUrl": {
+          "type": "string",
+          "description": "Deep-link URL to the originating resource."
+        },
+        "targetCompletionDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Suggested deadline derived from the source material."
+        }
+      }
+    }
+  },
+  "properties": {
+    "runType": {
+      "type": "string",
+      "enum": ["scheduled", "manual"],
+      "description": "Whether this run was triggered on a schedule or by a manual invocation."
+    },
+    "sourcesChecked": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of source identifiers (mailbox IDs, channel IDs, etc.) the agent polled during this run."
+    },
+    "summaries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/AgentSummary" },
+      "description": "Summaries produced during this run. The server stores each as a SummaryDoc scoped to the userId/orgId from the agent JWT."
+    }
+  }
+}

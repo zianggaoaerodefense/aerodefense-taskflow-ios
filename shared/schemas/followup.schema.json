@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://taskflow.internal/schemas/followup.schema.json",
+  "title": "FollowUpDraft",
+  "description": "A draft follow-up message (email, Slack, Jira comment, etc.) created by the agent or user after a task is marked done. Requires explicit user approval before any external send.",
+  "type": "object",
+  "required": ["id", "userId", "orgId", "taskId", "channelType", "body", "status", "createdBy", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "MongoDB ObjectId hex string (mapped from _id). Assigned by the server."
+    },
+    "userId": {
+      "type": "string",
+      "description": "Owning user ID. Sourced from the verified JWT — never from the client body."
+    },
+    "orgId": {
+      "type": "string",
+      "description": "Organisation ID for multi-tenant isolation."
+    },
+    "taskId": {
+      "type": "string",
+      "description": "ID of the Task document this follow-up is associated with."
+    },
+    "channelType": {
+      "type": "string",
+      "enum": ["email", "slack", "jira", "other"],
+      "description": "Target channel for the follow-up message."
+    },
+    "recipientOrTarget": {
+      "type": "string",
+      "description": "Email address, Slack channel/user, or Jira issue key that is the send target. Treat as potentially sensitive PII."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Subject line (used for email channel type)."
+    },
+    "body": {
+      "type": "string",
+      "description": "Full message body. May contain sensitive operational context."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "reviewed", "approved", "sentExternally", "archived"],
+      "description": "Lifecycle status. Only approved drafts may be sent externally, and only after explicit user action."
+    },
+    "createdBy": {
+      "type": "string",
+      "enum": ["user", "agent", "system"],
+      "description": "Actor that created this draft."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 creation timestamp. Set by the server."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 last-update timestamp. Maintained by the server on every write."
+    },
+    "approvedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of when the user approved this draft for external sending."
+    }
+  }
+}

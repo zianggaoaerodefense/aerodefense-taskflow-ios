@@ -1,0 +1,538 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA100001000000000000001A /* TaskFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100001000000000000001A /* TaskFlowApp.swift */; };
+		AA100002000000000000001A /* Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100002000000000000001A /* Summary.swift */; };
+		AA100003000000000000001A /* TaskItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100003000000000000001A /* TaskItem.swift */; };
+		AA100004000000000000001A /* FollowUpDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100004000000000000001A /* FollowUpDraft.swift */; };
+		AA100005000000000000001A /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100005000000000000001A /* AppSettings.swift */; };
+		AA100006000000000000001A /* SummaryParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100006000000000000001A /* SummaryParser.swift */; };
+		AA100007000000000000001A /* TaskExtractionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100007000000000000001A /* TaskExtractionService.swift */; };
+		AA100008000000000000001A /* FollowUpDraftService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100008000000000000001A /* FollowUpDraftService.swift */; };
+		AA100009000000000000001A /* ImportExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100009000000000000001A /* ImportExportService.swift */; };
+		AA10000A000000000000001A /* SecurityLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000A000000000000001A /* SecurityLockService.swift */; };
+		AA100030000000000000001A /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100030000000000000001A /* APIClient.swift */; };
+		AA100031000000000000001A /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100031000000000000001A /* SyncService.swift */; };
+		AA10000B000000000000001A /* SummaryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000B000000000000001A /* SummaryViewModel.swift */; };
+		AA10000C000000000000001A /* TaskBoardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000C000000000000001A /* TaskBoardViewModel.swift */; };
+		AA10000D000000000000001A /* FollowUpViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000D000000000000001A /* FollowUpViewModel.swift */; };
+		AA10000E000000000000001A /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000E000000000000001A /* SettingsViewModel.swift */; };
+		AA10000F000000000000001A /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000F000000000000001A /* RootTabView.swift */; };
+		AA100010000000000000001A /* SummaryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100010000000000000001A /* SummaryListView.swift */; };
+		AA100011000000000000001A /* SummaryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100011000000000000001A /* SummaryDetailView.swift */; };
+		AA100012000000000000001A /* AddSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100012000000000000001A /* AddSummaryView.swift */; };
+		AA100013000000000000001A /* TaskExtractionPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100013000000000000001A /* TaskExtractionPreviewView.swift */; };
+		AA100014000000000000001A /* TaskBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100014000000000000001A /* TaskBoardView.swift */; };
+		AA100015000000000000001A /* TaskCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100015000000000000001A /* TaskCardView.swift */; };
+		AA100016000000000000001A /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100016000000000000001A /* TaskDetailView.swift */; };
+		AA100017000000000000001A /* EditTaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100017000000000000001A /* EditTaskView.swift */; };
+		AA100018000000000000001A /* TaskComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100018000000000000001A /* TaskComponents.swift */; };
+		AA100019000000000000001A /* FollowUpListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100019000000000000001A /* FollowUpListView.swift */; };
+		AA10001A000000000000001A /* FollowUpDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001A000000000000001A /* FollowUpDetailView.swift */; };
+		AA10001B000000000000001A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001B000000000000001A /* SettingsView.swift */; };
+		AA10001C000000000000001A /* StatusChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001C000000000000001A /* StatusChip.swift */; };
+		AA10001D000000000000001A /* PriorityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001D000000000000001A /* PriorityBadge.swift */; };
+		AA10001E000000000000001A /* ResourceTypeBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001E000000000000001A /* ResourceTypeBadge.swift */; };
+		AA10001F000000000000001A /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10001F000000000000001A /* SharedComponents.swift */; };
+		AA100020000000000000001A /* SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100020000000000000001A /* SampleData.swift */; };
+		AA100021000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB100021000000000000001A /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		BB100001000000000000001A /* TaskFlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFlowApp.swift; sourceTree = "<group>"; };
+		BB100002000000000000001A /* Summary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Summary.swift; sourceTree = "<group>"; };
+		BB100003000000000000001A /* TaskItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskItem.swift; sourceTree = "<group>"; };
+		BB100004000000000000001A /* FollowUpDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpDraft.swift; sourceTree = "<group>"; };
+		BB100005000000000000001A /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		BB100006000000000000001A /* SummaryParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryParser.swift; sourceTree = "<group>"; };
+		BB100007000000000000001A /* TaskExtractionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskExtractionService.swift; sourceTree = "<group>"; };
+		BB100008000000000000001A /* FollowUpDraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpDraftService.swift; sourceTree = "<group>"; };
+		BB100009000000000000001A /* ImportExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportService.swift; sourceTree = "<group>"; };
+		BB10000A000000000000001A /* SecurityLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLockService.swift; sourceTree = "<group>"; };
+		BB100030000000000000001A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		BB100031000000000000001A /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		BB10000B000000000000001A /* SummaryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryViewModel.swift; sourceTree = "<group>"; };
+		BB10000C000000000000001A /* TaskBoardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardViewModel.swift; sourceTree = "<group>"; };
+		BB10000D000000000000001A /* FollowUpViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpViewModel.swift; sourceTree = "<group>"; };
+		BB10000E000000000000001A /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		BB10000F000000000000001A /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		BB100010000000000000001A /* SummaryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryListView.swift; sourceTree = "<group>"; };
+		BB100011000000000000001A /* SummaryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryDetailView.swift; sourceTree = "<group>"; };
+		BB100012000000000000001A /* AddSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSummaryView.swift; sourceTree = "<group>"; };
+		BB100013000000000000001A /* TaskExtractionPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskExtractionPreviewView.swift; sourceTree = "<group>"; };
+		BB100014000000000000001A /* TaskBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardView.swift; sourceTree = "<group>"; };
+		BB100015000000000000001A /* TaskCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCardView.swift; sourceTree = "<group>"; };
+		BB100016000000000000001A /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
+		BB100017000000000000001A /* EditTaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTaskView.swift; sourceTree = "<group>"; };
+		BB100018000000000000001A /* TaskComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskComponents.swift; sourceTree = "<group>"; };
+		BB100019000000000000001A /* FollowUpListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpListView.swift; sourceTree = "<group>"; };
+		BB10001A000000000000001A /* FollowUpDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpDetailView.swift; sourceTree = "<group>"; };
+		BB10001B000000000000001A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		BB10001C000000000000001A /* StatusChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusChip.swift; sourceTree = "<group>"; };
+		BB10001D000000000000001A /* PriorityBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriorityBadge.swift; sourceTree = "<group>"; };
+		BB10001E000000000000001A /* ResourceTypeBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceTypeBadge.swift; sourceTree = "<group>"; };
+		BB10001F000000000000001A /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		BB100020000000000000001A /* SampleData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleData.swift; sourceTree = "<group>"; };
+		BB100021000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		BB100022000000000000001A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CC100001000000000000001A /* TaskFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TaskFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DD100001000000000000001A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EE100001000000000000001A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CC100001000000000000001A /* TaskFlow.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EE100002000000000000001A /* TaskFlow */ = {
+			isa = PBXGroup;
+			children = (
+				BB100001000000000000001A /* TaskFlowApp.swift */,
+				BB100022000000000000001A /* Info.plist */,
+				BB100021000000000000001A /* Assets.xcassets */,
+				EE100003000000000000001A /* Models */,
+				EE100004000000000000001A /* Services */,
+				EE100005000000000000001A /* ViewModels */,
+				EE100006000000000000001A /* Views */,
+				EE10000B000000000000001A /* Resources */,
+			);
+			path = TaskFlow;
+			sourceTree = "<group>";
+		};
+		EE100003000000000000001A /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				BB100002000000000000001A /* Summary.swift */,
+				BB100003000000000000001A /* TaskItem.swift */,
+				BB100004000000000000001A /* FollowUpDraft.swift */,
+				BB100005000000000000001A /* AppSettings.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		EE100004000000000000001A /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				BB100006000000000000001A /* SummaryParser.swift */,
+				BB100007000000000000001A /* TaskExtractionService.swift */,
+				BB100008000000000000001A /* FollowUpDraftService.swift */,
+				BB100009000000000000001A /* ImportExportService.swift */,
+				BB10000A000000000000001A /* SecurityLockService.swift */,
+				BB100030000000000000001A /* APIClient.swift */,
+				BB100031000000000000001A /* SyncService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		EE100005000000000000001A /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				BB10000B000000000000001A /* SummaryViewModel.swift */,
+				BB10000C000000000000001A /* TaskBoardViewModel.swift */,
+				BB10000D000000000000001A /* FollowUpViewModel.swift */,
+				BB10000E000000000000001A /* SettingsViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		EE100006000000000000001A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				BB10000F000000000000001A /* RootTabView.swift */,
+				EE100007000000000000001A /* Summaries */,
+				EE100008000000000000001A /* Tasks */,
+				EE100009000000000000001A /* FollowUps */,
+				EE10000A000000000000001A /* Settings */,
+				EE10000C000000000000001A /* Components */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		EE100007000000000000001A /* Summaries */ = {
+			isa = PBXGroup;
+			children = (
+				BB100010000000000000001A /* SummaryListView.swift */,
+				BB100011000000000000001A /* SummaryDetailView.swift */,
+				BB100012000000000000001A /* AddSummaryView.swift */,
+				BB100013000000000000001A /* TaskExtractionPreviewView.swift */,
+			);
+			path = Summaries;
+			sourceTree = "<group>";
+		};
+		EE100008000000000000001A /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				BB100014000000000000001A /* TaskBoardView.swift */,
+				BB100015000000000000001A /* TaskCardView.swift */,
+				BB100016000000000000001A /* TaskDetailView.swift */,
+				BB100017000000000000001A /* EditTaskView.swift */,
+				BB100018000000000000001A /* TaskComponents.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		EE100009000000000000001A /* FollowUps */ = {
+			isa = PBXGroup;
+			children = (
+				BB100019000000000000001A /* FollowUpListView.swift */,
+				BB10001A000000000000001A /* FollowUpDetailView.swift */,
+			);
+			path = FollowUps;
+			sourceTree = "<group>";
+		};
+		EE10000A000000000000001A /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				BB10001B000000000000001A /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		EE10000B000000000000001A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BB100020000000000000001A /* SampleData.swift */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		EE10000C000000000000001A /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				BB10001C000000000000001A /* StatusChip.swift */,
+				BB10001D000000000000001A /* PriorityBadge.swift */,
+				BB10001E000000000000001A /* ResourceTypeBadge.swift */,
+				BB10001F000000000000001A /* SharedComponents.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		FF100001000000000000001A = {
+			isa = PBXGroup;
+			children = (
+				EE100002000000000000001A /* TaskFlow */,
+				EE100001000000000000001A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		11100001000000000000001A /* TaskFlow */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 22100002000000000000001A /* Build configuration list for PBXNativeTarget "TaskFlow" */;
+			buildPhases = (
+				33100001000000000000001A /* Sources */,
+				DD100001000000000000001A /* Frameworks */,
+				44100001000000000000001A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TaskFlow;
+			productName = TaskFlow;
+			productReference = CC100001000000000000001A /* TaskFlow.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		55100001000000000000001A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					11100001000000000000001A = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 22100001000000000000001A /* Build configuration list for PBXProject "TaskFlow" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = FF100001000000000000001A;
+			productRefGroup = EE100001000000000000001A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				11100001000000000000001A /* TaskFlow */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		44100001000000000000001A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA100021000000000000001A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		33100001000000000000001A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA100001000000000000001A /* TaskFlowApp.swift in Sources */,
+				AA100002000000000000001A /* Summary.swift in Sources */,
+				AA100003000000000000001A /* TaskItem.swift in Sources */,
+				AA100004000000000000001A /* FollowUpDraft.swift in Sources */,
+				AA100005000000000000001A /* AppSettings.swift in Sources */,
+				AA100006000000000000001A /* SummaryParser.swift in Sources */,
+				AA100007000000000000001A /* TaskExtractionService.swift in Sources */,
+				AA100008000000000000001A /* FollowUpDraftService.swift in Sources */,
+				AA100009000000000000001A /* ImportExportService.swift in Sources */,
+				AA10000A000000000000001A /* SecurityLockService.swift in Sources */,
+				AA100030000000000000001A /* APIClient.swift in Sources */,
+				AA100031000000000000001A /* SyncService.swift in Sources */,
+				AA10000B000000000000001A /* SummaryViewModel.swift in Sources */,
+				AA10000C000000000000001A /* TaskBoardViewModel.swift in Sources */,
+				AA10000D000000000000001A /* FollowUpViewModel.swift in Sources */,
+				AA10000E000000000000001A /* SettingsViewModel.swift in Sources */,
+				AA10000F000000000000001A /* RootTabView.swift in Sources */,
+				AA100010000000000000001A /* SummaryListView.swift in Sources */,
+				AA100011000000000000001A /* SummaryDetailView.swift in Sources */,
+				AA100012000000000000001A /* AddSummaryView.swift in Sources */,
+				AA100013000000000000001A /* TaskExtractionPreviewView.swift in Sources */,
+				AA100014000000000000001A /* TaskBoardView.swift in Sources */,
+				AA100015000000000000001A /* TaskCardView.swift in Sources */,
+				AA100016000000000000001A /* TaskDetailView.swift in Sources */,
+				AA100017000000000000001A /* EditTaskView.swift in Sources */,
+				AA100018000000000000001A /* TaskComponents.swift in Sources */,
+				AA100019000000000000001A /* FollowUpListView.swift in Sources */,
+				AA10001A000000000000001A /* FollowUpDetailView.swift in Sources */,
+				AA10001B000000000000001A /* SettingsView.swift in Sources */,
+				AA10001C000000000000001A /* StatusChip.swift in Sources */,
+				AA10001D000000000000001A /* PriorityBadge.swift in Sources */,
+				AA10001E000000000000001A /* ResourceTypeBadge.swift in Sources */,
+				AA10001F000000000000001A /* SharedComponents.swift in Sources */,
+				AA100020000000000000001A /* SampleData.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		66100001000000000000001A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLES = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		66100002000000000000001A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLES = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		77100001000000000000001A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TaskFlow/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.taskflow.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		77100002000000000000001A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TaskFlow/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.taskflow.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		22100001000000000000001A /* Build configuration list for PBXProject "TaskFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				66100001000000000000001A /* Debug */,
+				66100002000000000000001A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		22100002000000000000001A /* Build configuration list for PBXNativeTarget "TaskFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				77100001000000000000001A /* Debug */,
+				77100002000000000000001A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 55100001000000000000001A /* Project object */;
+}
