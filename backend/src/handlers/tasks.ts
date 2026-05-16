@@ -20,6 +20,7 @@ import {
   updateTask,
   markTaskStatus,
 } from '../db/repositories/taskRepo';
+import { insertDraft } from '../db/repositories/followupRepo';
 import { insertAuditEvent } from '../db/repositories/auditRepo';
 import { CreateTaskSchema, UpdateTaskSchema } from '../schemas/task';
 import {
@@ -29,7 +30,7 @@ import {
   getQueryParam,
 } from '../utils/response';
 import { handleError, NotFoundError } from '../utils/errors';
-import { TaskDoc, TaskDTO, TaskStatus, toId, toISOString } from '../models/types';
+import { TaskDoc, TaskDTO, TaskStatus, TaskPriority, ResourceType, ChannelType, toId, toISOString } from '../models/types';
 
 // ---------------------------------------------------------------------------
 // DTO mapper
@@ -74,6 +75,9 @@ export const list = withAuth(
       const summaryId = getQueryParam(event, 'summaryId');
       const limitStr = getQueryParam(event, 'limit');
       const skipStr = getQueryParam(event, 'skip');
+      // ?priority= is accepted for client-side convenience; filtering is applied after fetch
+      // since taskRepo does not yet expose a priority filter parameter.
+      const priorityParam = getQueryParam(event, 'priority') as TaskPriority | undefined;
 
       const tasks = await findTasks(db, auth, {
         status: statusParam,
@@ -82,7 +86,9 @@ export const list = withAuth(
         skip: skipStr ? parseInt(skipStr, 10) : 0,
       });
 
-      return successResponse({ tasks: tasks.map(toTaskDTO) });
+      const filtered = priorityParam ? tasks.filter((t) => t.priority === priorityParam) : tasks;
+
+      return successResponse({ tasks: filtered.map(toTaskDTO) });
     } catch (err) {
       return handleError(err);
     }
@@ -176,6 +182,7 @@ export const update = withAuth(
         action: 'task.update',
         entityType: 'task',
         entityId: id,
+        after: { title: doc.title, status: doc.status, priority: doc.priority },
       });
 
       return successResponse({ task: toTaskDTO(doc) });
@@ -184,6 +191,34 @@ export const update = withAuth(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Follow-up draft generation helpers (used by markDone)
+// ---------------------------------------------------------------------------
+
+function mapResourceTypeToChannel(rt: ResourceType): ChannelType {
+  switch (rt) {
+    case 'email': return 'email';
+    case 'slack': return 'slack';
+    case 'jira': return 'jira';
+    default: return 'other';
+  }
+}
+
+function generateFollowUpBody(task: TaskDoc, channelType: ChannelType): string {
+  const name = task.requesterName ?? 'there';
+  const completionDate = task.actualCompletionDate?.toISOString().split('T')[0] ?? 'recently';
+  switch (channelType) {
+    case 'email':
+      return `Hi ${name},\n\nI wanted to follow up and let you know that I completed: ${task.title}.\n\nSummary:\n${task.details}\n\nPlease let me know if you need anything else.\n\nBest,\nZiang`;
+    case 'slack':
+      return `Hi ${name}, quick update: I completed ${task.title}. ${task.details.slice(0, 100)}. Let me know if you want me to adjust anything.`;
+    case 'jira':
+      return `Completed this task.\n\nSummary:\n${task.details}\n\nCompletion date: ${completionDate}`;
+    default:
+      return `Completed: ${task.title}\n\nDetails:\n${task.details}`;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Status transition helpers
@@ -208,7 +243,7 @@ function statusHandler(
           newStatus,
           extraFields ? extraFields(now) : undefined,
         );
-        if (!doc) throw new NotFoundError('Task');
+        if (!doc) throw new NotFoundError('Task not found');
 
         await insertAuditEvent(db, auth, {
           actor: auth.type,
@@ -228,8 +263,9 @@ function statusHandler(
 }
 
 // POST /tasks/{id}/mark-reviewed
+// Transitions task to 'actionNeeded' (reviewed + cleared for action) and stamps reviewedAt.
 export const markReviewed = statusHandler(
-  'reviewNeeded',
+  'actionNeeded',
   'task.markReviewed',
   (now) => ({ reviewedAt: now }),
 );
@@ -238,6 +274,7 @@ export const markReviewed = statusHandler(
 export const markActionNeeded = statusHandler(
   'actionNeeded',
   'task.markActionNeeded',
+  (now) => ({ reviewedAt: now }),
 );
 
 // POST /tasks/{id}/mark-waiting
@@ -247,10 +284,67 @@ export const markWaiting = statusHandler(
 );
 
 // POST /tasks/{id}/mark-done
-export const markDone = statusHandler(
-  'done',
-  'task.markDone',
-  (now) => ({ doneAt: now, actualCompletionDate: now }),
+// Transitions to 'done', stamps doneAt + actualCompletionDate, then auto-generates
+// a follow-up draft if one does not already exist.
+export const markDone = withAuth(
+  async (event: APIGatewayProxyEvent, auth: AuthContext): Promise<APIGatewayProxyResult> => {
+    try {
+      const id = getPathParam(event, 'id');
+      const db = await getDb();
+      const now = new Date();
+
+      let task = await markTaskStatus(db, auth, id, 'done', {
+        doneAt: now,
+        actualCompletionDate: now,
+      });
+      if (!task) throw new NotFoundError('Task not found');
+
+      await insertAuditEvent(db, auth, {
+        actor: auth.type,
+        actorId: auth.type === 'agent' ? auth.agentId : auth.userId,
+        action: 'task.markDone',
+        entityType: 'task',
+        entityId: id,
+        after: { status: 'done', doneAt: now.toISOString() },
+      });
+
+      // Auto-create follow-up draft if not already present.
+      if (!task.followUpDraftId) {
+        const channelType = mapResourceTypeToChannel(task.resourceType);
+        const draftBody = generateFollowUpBody(task, channelType);
+        const draft = await insertDraft(db, auth, {
+          taskId: toId(task),
+          channelType,
+          recipientOrTarget: task.requesterName,
+          subject: channelType === 'email' ? `Follow-up: ${task.title}` : undefined,
+          body: draftBody,
+          status: 'draft',
+          createdBy: 'system',
+          userId: auth.userId,
+          orgId: auth.orgId,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        // Link draft id back to task.
+        const updatedTask = await updateTask(db, auth, id, { followUpDraftId: toId(draft) });
+        if (updatedTask) task = updatedTask;
+
+        await insertAuditEvent(db, auth, {
+          actor: auth.type,
+          actorId: auth.type === 'agent' ? auth.agentId : auth.userId,
+          action: 'followup.autoCreate',
+          entityType: 'followUpDraft',
+          entityId: toId(draft),
+          after: { taskId: id, channelType },
+        });
+      }
+
+      return successResponse({ task: toTaskDTO(task) });
+    } catch (err) {
+      return handleError(err);
+    }
+  },
 );
 
 // POST /tasks/{id}/archive

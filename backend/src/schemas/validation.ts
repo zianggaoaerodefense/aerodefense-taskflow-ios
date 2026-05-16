@@ -71,7 +71,7 @@ export const UpdateSummarySchema = z.object({
         .optional(),
     })
     .optional(),
-}).refine((data) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
+}).refine((data: Record<string, unknown>) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
 
 export type UpdateSummaryInput = z.infer<typeof UpdateSummarySchema>;
 
@@ -108,7 +108,7 @@ export const UpdateTaskSchema = z.object({
   resourceUrl: z.string().url().optional(),
   targetCompletionDate: z.string().datetime().optional(),
   notes: z.string().optional(),
-}).refine((data) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
+}).refine((data: Record<string, unknown>) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
 
 export type UpdateTaskInput = z.infer<typeof UpdateTaskSchema>;
 
@@ -157,7 +157,7 @@ export const UpdateFollowUpDraftSchema = z.object({
   subject: z.string().optional(),
   body: z.string().min(1).optional(),
   status: draftStatusSchema.optional(),
-}).refine((data) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
+}).refine((data: Record<string, unknown>) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
 
 export type UpdateFollowUpDraftInput = z.infer<typeof UpdateFollowUpDraftSchema>;
 

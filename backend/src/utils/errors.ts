@@ -1,5 +1,5 @@
 import { APIGatewayProxyResult } from 'aws-lambda';
-import { ZodError } from 'zod';
+import { ZodError, ZodIssue } from 'zod';
 import { errorResponse } from './response';
 import { AuthError } from '../middleware/withAuth';
 
@@ -19,7 +19,7 @@ export function handleError(err: unknown): APIGatewayProxyResult {
 
   if (err instanceof ZodError) {
     // Return field-level validation errors — these contain no sensitive data.
-    const issues = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+    const issues = err.errors.map((e: ZodIssue) => `${e.path.join('.')}: ${e.message}`).join('; ');
     return errorResponse(400, `Validation error: ${issues}`);
   }
 
