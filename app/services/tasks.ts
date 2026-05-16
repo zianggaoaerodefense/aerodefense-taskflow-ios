@@ -3,14 +3,21 @@
 // see user-side changes on the next agent-context call.
 //
 // SECURITY:
-// - user_id is set by RLS from the authenticated session JWT; never passed
-//   in insert/update payloads from the app.
-// - task_events are user-scoped by RLS as well.
+// - user_id is never passed in task insert/update payloads (set by RLS).
+// - task_events.user_id is NOT NULL with an RLS policy requiring
+//   auth.uid() = user_id, so it must be supplied explicitly in every insert.
+//   We read it from the cached session — no extra network round-trip.
 
 import { supabase } from '../lib/supabase'
 import type { Task, TaskPriority, TaskStatus } from '../types/database'
 
 export type { TaskStatus, TaskPriority }
+
+async function currentUserId(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Not authenticated')
+  return session.user.id
+}
 
 export async function fetchTasks(): Promise<Task[]> {
   const { data, error } = await supabase
@@ -44,8 +51,9 @@ export async function createTask(input: {
 
   if (error) throw error
 
-  // Emit task event — failures here are non-blocking
+  const userId = await currentUserId()
   await supabase.from('task_events').insert({
+    user_id: userId,
     task_id: data.id,
     actor: 'user',
     event_type: 'created',
@@ -67,7 +75,9 @@ export async function updateTaskStatus(
 
   if (error) throw error
 
+  const userId = await currentUserId()
   await supabase.from('task_events').insert({
+    user_id: userId,
     task_id: task.id,
     actor: 'user',
     event_type: 'status_changed',
@@ -93,7 +103,9 @@ export async function snoozeTask(task: Task, until: Date): Promise<void> {
 
   if (error) throw error
 
+  const userId = await currentUserId()
   await supabase.from('task_events').insert({
+    user_id: userId,
     task_id: task.id,
     actor: 'user',
     event_type: 'snoozed',
@@ -115,7 +127,9 @@ export async function updateTaskFields(
   const { error } = await supabase.from('tasks').update(updates).eq('id', taskId)
   if (error) throw error
 
+  const userId = await currentUserId()
   await supabase.from('task_events').insert({
+    user_id: userId,
     task_id: taskId,
     actor: 'user',
     event_type: 'updated',
