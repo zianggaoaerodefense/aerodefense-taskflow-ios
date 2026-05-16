@@ -125,6 +125,9 @@ export const create = withAuth(
 
 // ---------------------------------------------------------------------------
 // POST /approval-requests/{id}/approve
+//
+// Sets status='approved'. Does NOT execute the action automatically.
+// TODO: Phase 2 — trigger actual external action on approve/execute
 // ---------------------------------------------------------------------------
 
 export const approve = withAuth(

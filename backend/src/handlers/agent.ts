@@ -17,76 +17,151 @@ import { AuthContext } from '../auth/types';
 import { withAuth, requireScope } from '../middleware/withAuth';
 import { AGENT_SCOPES } from '../auth/types';
 import { getDb } from '../db/connection';
-import { findTasks } from '../db/repositories/taskRepo';
+import { insertSummary } from '../db/repositories/summaryRepo';
+import { findTasks, insertTask } from '../db/repositories/taskRepo';
 import { findDrafts, insertDraft } from '../db/repositories/followupRepo';
-import { insertApproval } from '../db/repositories/approvalRepo';
-import { insertAuditEvent, findAuditEvents } from '../db/repositories/auditRepo';
+import { findApprovals, insertApproval } from '../db/repositories/approvalRepo';
+import { insertAgentRun, updateAgentRun } from '../db/repositories/agentRunRepo';
+import { insertAuditEvent } from '../db/repositories/auditRepo';
 import {
-  AgentRunResultSchema,
-  AgentCreateFollowupDraftsSchema,
-  AgentCreateApprovalRequestsSchema,
-} from '../schemas/agent';
+  AgentRunResultsSchema,
+  AgentCreateFollowUpDraftSchema,
+  AgentCreateApprovalRequestSchema,
+} from '../schemas/validation';
 import {
   successResponse,
   parseBody,
   getQueryParam,
 } from '../utils/response';
 import { handleError } from '../utils/errors';
-import {
-  AgentRunDoc,
-  FollowUpDraftDoc,
-  ApprovalRequestDoc,
-  toId,
-} from '../models/types';
+import { toId } from '../models/types';
 
 // ---------------------------------------------------------------------------
-// POST /agent/run-results
+// POST /agent/run-results — scope: agent:summaries:create
 //
-// Agent submits the outcome of a scheduled or manual run.
+// Agent submits the result of a scheduled or manual run.
+// Creates summaries and task candidates, then marks the run completed.
 // ---------------------------------------------------------------------------
 
 export const submitRunResults = withAuth(
   async (event: APIGatewayProxyEvent, auth: AuthContext): Promise<APIGatewayProxyResult> => {
     try {
-      // Any agent with a valid token may submit run results — no extra scope
-      // required for telemetry. Callers must still present a valid agent JWT.
-      if (auth.type !== 'agent') {
-        return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Agent token required' }) };
-      }
+      requireScope(auth, AGENT_SCOPES.SUMMARIES_CREATE);
 
       const body = parseBody<unknown>(event);
-      const input = AgentRunResultSchema.parse(body);
+      const input = AgentRunResultsSchema.parse(body);
       const db = await getDb();
       const now = new Date();
 
-      const doc: Omit<AgentRunDoc, '_id'> = {
+      // 1. Create AgentRun record with status='started'.
+      const run = await insertAgentRun(db, auth, {
+        runType: input.runType,
+        status: 'started',
+        agentId: auth.agentId,  // always from verified token, never from body
+        sourcesChecked: input.sourcesChecked,
+        summaryIds: [],
+        taskIds: [],
         userId: auth.userId,
         orgId: auth.orgId,
-        runType: input.runType,
-        status: input.status,
-        agentId: auth.agentId,         // agentId always from verified token, not body
-        sourcesChecked: input.sourcesChecked,
-        summaryIds: input.summaryIds,
-        taskIds: input.taskIds,
-        errorMessage: input.errorMessage,
-        completedAt: input.completedAt ? new Date(input.completedAt) : undefined,
         createdAt: now,
         updatedAt: now,
-      };
+      });
+      const runId = toId(run);
 
-      const result = await db.collection<AgentRunDoc>('agentRuns').insertOne(doc as AgentRunDoc);
-      const insertedId = result.insertedId.toHexString();
+      const summaryIds: string[] = [];
+      const taskIds: string[] = [];
+
+      // 2. For each summary in the payload: insert summary, then insert task candidates.
+      for (const summaryPayload of input.summaries) {
+        const summaryDoc = await insertSummary(db, auth, {
+          title: summaryPayload.title,
+          sourceType: summaryPayload.sourceType,
+          sourceRefs: summaryPayload.sourceRefs,
+          rawText: summaryPayload.rawText,
+          structured: summaryPayload.structured,
+          tags: summaryPayload.tags,
+          suggestedPriority: summaryPayload.suggestedPriority,
+          reviewNeeded: true,
+          actionNeeded: false,
+          taskCandidateIds: [],
+          linkedTaskIds: [],
+          userId: auth.userId,
+          orgId: auth.orgId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const summaryId = toId(summaryDoc);
+        summaryIds.push(summaryId);
+
+        await insertAuditEvent(db, auth, {
+          actor: 'agent',
+          actorId: auth.agentId,
+          action: 'summary.create',
+          entityType: 'summary',
+          entityId: summaryId,
+          after: { title: summaryDoc.title, sourceType: summaryDoc.sourceType, runId },
+        });
+
+        // Insert task candidates as tasks with status from the candidate schema.
+        for (const candidate of summaryPayload.taskCandidates) {
+          const task = await insertTask(db, auth, {
+            summaryId,
+            title: candidate.title,
+            details: candidate.details,
+            status: candidate.status,
+            priority: candidate.priority,
+            requesterName: candidate.requesterName,
+            requesterContact: candidate.requesterContact,
+            resourceType: candidate.resourceType,
+            resourceLabel: candidate.resourceLabel,
+            resourceUrl: candidate.resourceUrl,
+            targetCompletionDate: candidate.targetCompletionDate ? new Date(candidate.targetCompletionDate) : undefined,
+            notes: '',
+            createdBy: 'agent',
+            userId: auth.userId,
+            orgId: auth.orgId,
+            createdAt: now,
+            updatedAt: now,
+          });
+          const taskId = toId(task);
+          taskIds.push(taskId);
+
+          await insertAuditEvent(db, auth, {
+            actor: 'agent',
+            actorId: auth.agentId,
+            action: 'task.create',
+            entityType: 'task',
+            entityId: taskId,
+            after: { title: task.title, status: task.status, summaryId, runId },
+          });
+        }
+      }
+
+      // 3. Update AgentRun with status='completed', summaryIds, taskIds.
+      await updateAgentRun(db, auth, runId, {
+        status: 'completed',
+        summaryIds,
+        taskIds,
+        completedAt: new Date(),
+      });
 
       await insertAuditEvent(db, auth, {
         actor: 'agent',
         actorId: auth.agentId,
-        action: 'agent.submitRunResults',
+        action: 'agent.runCompleted',
         entityType: 'agentRun',
-        entityId: insertedId,
-        after: { status: input.status, runType: input.runType },
+        entityId: runId,
+        after: { status: 'completed', summaryCount: summaryIds.length, taskCount: taskIds.length },
       });
 
-      return successResponse({ runId: insertedId, status: input.status }, 201);
+      return successResponse({
+        runId,
+        status: 'completed',
+        summariesCreated: summaryIds.length,
+        tasksCreated: taskIds.length,
+        summaryIds,
+        taskIds,
+      }, 201);
     } catch (err) {
       return handleError(err);
     }
@@ -137,10 +212,10 @@ export const pendingReview = withAuth(
 );
 
 // ---------------------------------------------------------------------------
-// GET /agent/changes
+// GET /agent/changes — scope: agent:tasks:read
 //
-// Returns recent audit events so the agent can sync its local state.
-// Requires TASKS_READ scope.
+// Returns recent tasks, follow-up drafts, and approvals updated since a given
+// timestamp. Defaults to the last 24 hours. Accepts optional ?since= (ISO-8601).
 // ---------------------------------------------------------------------------
 
 export const changes = withAuth(
@@ -149,22 +224,42 @@ export const changes = withAuth(
       requireScope(auth, AGENT_SCOPES.TASKS_READ);
 
       const db = await getDb();
-      const entityType = getQueryParam(event, 'entityType');
-      const limitStr = getQueryParam(event, 'limit');
+      const sinceParam = getQueryParam(event, 'since');
+      const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const limit = 100;
 
-      const events = await findAuditEvents(db, auth, {
-        entityType,
-        limit: limitStr ? Math.min(parseInt(limitStr, 10), 200) : 100,
-      });
+      // Fetch recent tasks, follow-up drafts, and approvals in parallel.
+      const [tasks, drafts, approvals] = await Promise.all([
+        findTasks(db, auth, { limit }),
+        findDrafts(db, auth, { limit }),
+        findApprovals(db, auth, { limit }),
+      ]);
+
+      const updatedTasks = tasks.filter((t) => t.updatedAt >= since);
+      const updatedDrafts = drafts.filter((d) => d.updatedAt >= since);
+      const updatedApprovals = approvals.filter((a) => a.updatedAt >= since);
 
       return successResponse({
-        changes: events.map((e) => ({
-          id: toId(e),
-          action: e.action,
-          entityType: e.entityType,
-          entityId: e.entityId,
-          actor: e.actor,
-          createdAt: e.createdAt.toISOString(),
+        since: since.toISOString(),
+        tasks: updatedTasks.map((t) => ({
+          id: toId(t),
+          title: t.title,
+          status: t.status,
+          priority: t.priority,
+          updatedAt: t.updatedAt.toISOString(),
+        })),
+        followupDrafts: updatedDrafts.map((d) => ({
+          id: toId(d),
+          taskId: d.taskId,
+          channelType: d.channelType,
+          status: d.status,
+          updatedAt: d.updatedAt.toISOString(),
+        })),
+        approvals: updatedApprovals.map((a) => ({
+          id: toId(a),
+          actionType: a.actionType,
+          status: a.status,
+          updatedAt: a.updatedAt.toISOString(),
         })),
       });
     } catch (err) {
@@ -174,10 +269,11 @@ export const changes = withAuth(
 );
 
 // ---------------------------------------------------------------------------
-// POST /agent/followup-drafts
+// POST /agent/followup-drafts — scope: agent:followups:draft
 //
-// Agent creates one or more follow-up drafts for CTO review.
-// Requires FOLLOWUPS_DRAFT scope.
+// Agent creates a single follow-up draft for CTO review.
+// Body: { taskId, channelType, recipientOrTarget?, subject?, body }
+// Draft is created with status='draft' and createdBy='agent'.
 // ---------------------------------------------------------------------------
 
 export const createFollowupDrafts = withAuth(
@@ -186,44 +282,42 @@ export const createFollowupDrafts = withAuth(
       requireScope(auth, AGENT_SCOPES.FOLLOWUPS_DRAFT);
 
       const body = parseBody<unknown>(event);
-      const input = AgentCreateFollowupDraftsSchema.parse(body);
+      const input = AgentCreateFollowUpDraftSchema.parse(body);
       const db = await getDb();
       const now = new Date();
 
-      const created: FollowUpDraftDoc[] = [];
-      for (const draft of input.drafts) {
-        const doc = await insertDraft(db, auth, {
-          ...draft,
-          status: 'draft',
-          userId: auth.userId,
-          orgId: auth.orgId,
-          createdBy: 'agent',
-          createdAt: now,
-          updatedAt: now,
-        });
-        created.push(doc);
+      const draft = await insertDraft(db, auth, {
+        taskId: input.taskId,
+        channelType: input.channelType,
+        recipientOrTarget: input.recipientOrTarget,
+        subject: input.subject,
+        body: input.body,
+        status: 'draft',
+        createdBy: 'agent',
+        userId: auth.userId,
+        orgId: auth.orgId,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-        await insertAuditEvent(db, auth, {
-          actor: 'agent',
-          actorId: auth.agentId,
-          action: 'agent.createFollowupDraft',
-          entityType: 'followUpDraft',
-          entityId: toId(doc),
-        });
-      }
+      await insertAuditEvent(db, auth, {
+        actor: 'agent',
+        actorId: auth.agentId,
+        action: 'agent.createFollowupDraft',
+        entityType: 'followUpDraft',
+        entityId: toId(draft),
+        after: { taskId: input.taskId, channelType: input.channelType },
+      });
 
-      return successResponse(
-        {
-          created: created.map((d) => ({
-            id: toId(d),
-            taskId: d.taskId,
-            channelType: d.channelType,
-            status: d.status,
-          })),
-          count: created.length,
+      return successResponse({
+        followupDraft: {
+          id: toId(draft),
+          taskId: draft.taskId,
+          channelType: draft.channelType,
+          status: draft.status,
+          createdAt: draft.createdAt.toISOString(),
         },
-        201,
-      );
+      }, 201);
     } catch (err) {
       return handleError(err);
     }
@@ -231,12 +325,15 @@ export const createFollowupDrafts = withAuth(
 );
 
 // ---------------------------------------------------------------------------
-// POST /agent/approval-requests
+// POST /agent/approval-requests — scope: agent:approvals:create
 //
-// Agent creates one or more approval requests for CTO action.
-// Requires APPROVALS_CREATE scope.
-// All created requests are in 'pending' status — never auto-executed.
+// Agent creates a single approval request for CTO action.
+// Body: { taskId?, draftId?, actionType, payload }
+// Request is created with status='pending' and createdBy='agent'.
+// Agent CANNOT execute the approval — only humans can via /approve + /mark-executed.
 // ---------------------------------------------------------------------------
+
+// TODO: Phase 2 — trigger actual external action on approve/execute
 
 export const createApprovalRequests = withAuth(
   async (event: APIGatewayProxyEvent, auth: AuthContext): Promise<APIGatewayProxyResult> => {
@@ -244,45 +341,42 @@ export const createApprovalRequests = withAuth(
       requireScope(auth, AGENT_SCOPES.APPROVALS_CREATE);
 
       const body = parseBody<unknown>(event);
-      const input = AgentCreateApprovalRequestsSchema.parse(body);
+      const input = AgentCreateApprovalRequestSchema.parse(body);
       const db = await getDb();
       const now = new Date();
 
-      const created: ApprovalRequestDoc[] = [];
-      for (const req of input.requests) {
-        const doc = await insertApproval(db, auth, {
-          ...req,
-          status: 'pending',
-          expiresAt: req.expiresAt ? new Date(req.expiresAt) : undefined,
-          userId: auth.userId,
-          orgId: auth.orgId,
-          createdBy: 'agent',
-          createdAt: now,
-          updatedAt: now,
-        });
-        created.push(doc);
+      const approval = await insertApproval(db, auth, {
+        taskId: input.taskId,
+        draftId: input.draftId,
+        actionType: input.actionType,
+        payload: input.payload,
+        status: 'pending',
+        createdBy: 'agent',
+        userId: auth.userId,
+        orgId: auth.orgId,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-        await insertAuditEvent(db, auth, {
-          actor: 'agent',
-          actorId: auth.agentId,
-          action: 'agent.createApprovalRequest',
-          entityType: 'approvalRequest',
-          entityId: toId(doc),
-          after: { actionType: req.actionType, status: 'pending' },
-        });
-      }
+      await insertAuditEvent(db, auth, {
+        actor: 'agent',
+        actorId: auth.agentId,
+        action: 'agent.createApprovalRequest',
+        entityType: 'approvalRequest',
+        entityId: toId(approval),
+        after: { actionType: input.actionType, status: 'pending', taskId: input.taskId, draftId: input.draftId },
+      });
 
-      return successResponse(
-        {
-          created: created.map((r) => ({
-            id: toId(r),
-            actionType: r.actionType,
-            status: r.status,
-          })),
-          count: created.length,
+      return successResponse({
+        approvalRequest: {
+          id: toId(approval),
+          actionType: approval.actionType,
+          status: approval.status,
+          taskId: approval.taskId,
+          draftId: approval.draftId,
+          createdAt: approval.createdAt.toISOString(),
         },
-        201,
-      );
+      }, 201);
     } catch (err) {
       return handleError(err);
     }

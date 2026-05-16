@@ -200,6 +200,9 @@ export const markReviewed = withAuth(
 
 // ---------------------------------------------------------------------------
 // POST /followups/{id}/approve
+//
+// Sets status='approved'. Does NOT send the draft externally.
+// TODO: Phase 2 — implement actual send via approved integrations
 // ---------------------------------------------------------------------------
 
 export const approve = withAuth(
