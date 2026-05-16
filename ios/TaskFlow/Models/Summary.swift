@@ -11,6 +11,12 @@ final class Summary {
     var rawText: String
     var tags: [String]
 
+    // Backend sync fields
+    var remoteId: String?
+    var isSynced: Bool
+    var reviewNeeded: Bool
+    var actionNeeded: Bool
+
     @Relationship(deleteRule: .cascade, inverse: \SummarySection.summary)
     var sections: [SummarySection]
 
@@ -26,7 +32,9 @@ final class Summary {
         rawText: String,
         tags: [String] = [],
         sections: [SummarySection] = [],
-        linkedTasks: [TaskItem] = []
+        linkedTasks: [TaskItem] = [],
+        reviewNeeded: Bool = false,
+        actionNeeded: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -37,6 +45,9 @@ final class Summary {
         self.tags = tags
         self.sections = sections
         self.linkedTasks = linkedTasks
+        self.reviewNeeded = reviewNeeded
+        self.actionNeeded = actionNeeded
+        self.isSynced = false
     }
 }
 

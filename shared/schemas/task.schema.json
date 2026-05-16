@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://taskflow.internal/schemas/task.schema.json",
+  "title": "Task",
+  "description": "A TaskFlow task item representing a discrete action or request managed by a user.",
+  "type": "object",
+  "required": ["id", "userId", "orgId", "title", "status", "priority", "resourceType", "createdBy", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "MongoDB ObjectId hex string (mapped from _id). Assigned by the server."
+    },
+    "userId": {
+      "type": "string",
+      "description": "Owning user ID. Always sourced from the verified JWT — never from the client request body."
+    },
+    "orgId": {
+      "type": "string",
+      "description": "Organisation ID for multi-tenant isolation. Sourced from the verified JWT."
+    },
+    "summaryId": {
+      "type": "string",
+      "description": "Optional reference to the Summary document this task was derived from."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Short, human-readable title for the task."
+    },
+    "details": {
+      "type": "string",
+      "default": "",
+      "description": "Extended description or context for the task."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["new", "reviewNeeded", "actionNeeded", "waiting", "done", "archived"],
+      "description": "Lifecycle status of the task."
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "normal", "high", "urgent"],
+      "description": "User-assigned or agent-suggested priority."
+    },
+    "requesterName": {
+      "type": "string",
+      "description": "Display name of the person who initiated the underlying request, if known."
+    },
+    "requesterContact": {
+      "type": "string",
+      "description": "Email address or other contact info for the requester."
+    },
+    "resourceType": {
+      "type": "string",
+      "enum": ["email", "slack", "jira", "github", "document", "other"],
+      "description": "The channel or system the original request came from."
+    },
+    "resourceLabel": {
+      "type": "string",
+      "description": "Human-readable label for the linked resource (e.g. Jira ticket key, email subject)."
+    },
+    "resourceUrl": {
+      "type": "string",
+      "description": "Deep-link URL to the originating resource."
+    },
+    "targetCompletionDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of the desired completion deadline."
+    },
+    "actualCompletionDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of when the task was actually completed."
+    },
+    "reviewedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of when the task was last reviewed."
+    },
+    "doneAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of when the task status was set to done."
+    },
+    "notes": {
+      "type": "string",
+      "default": "",
+      "description": "Free-form notes appended by the user."
+    },
+    "followUpDraftId": {
+      "type": "string",
+      "description": "Reference to the FollowUpDraft document created when this task was marked done."
+    },
+    "createdBy": {
+      "type": "string",
+      "enum": ["user", "agent", "system"],
+      "description": "Actor that created this task."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 creation timestamp. Set by the server."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 last-update timestamp. Maintained by the server on every write."
+    }
+  }
+}

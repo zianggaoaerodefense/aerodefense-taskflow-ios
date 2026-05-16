@@ -1,0 +1,300 @@
+service: taskflow-backend
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-plugin-typescript
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  memorySize: 256
+  timeout: 29
+  environment:
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    AGENT_JWT_SECRET: ${env:AGENT_JWT_SECRET}
+    NODE_ENV: ${env:NODE_ENV, 'production'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - arn:aws:secretsmanager:*:*:secret:taskflow/*
+  httpApi:
+    cors:
+      allowedOrigins:
+        - ${env:ALLOWED_ORIGINS, 'https://taskflow.internal'}
+      allowedHeaders:
+        - Authorization
+        - Content-Type
+      allowedMethods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+
+functions:
+  # ── Health ────────────────────────────────────────────────────────────────
+  health:
+    handler: src/handlers/health.handler
+    events:
+      - httpApi:
+          path: /health
+          method: GET
+
+  # ── Auth / Me ─────────────────────────────────────────────────────────────
+  getMe:
+    handler: src/handlers/auth.getMe
+    events:
+      - httpApi:
+          path: /me
+          method: GET
+
+  # ── Summaries ─────────────────────────────────────────────────────────────
+  summariesList:
+    handler: src/handlers/summaries.list
+    events:
+      - httpApi:
+          path: /summaries
+          method: GET
+
+  summariesCreate:
+    handler: src/handlers/summaries.create
+    events:
+      - httpApi:
+          path: /summaries
+          method: POST
+
+  summariesGet:
+    handler: src/handlers/summaries.get
+    events:
+      - httpApi:
+          path: /summaries/{id}
+          method: GET
+
+  summariesUpdate:
+    handler: src/handlers/summaries.update
+    events:
+      - httpApi:
+          path: /summaries/{id}
+          method: PATCH
+
+  summariesTaskCandidates:
+    handler: src/handlers/summaries.taskCandidates
+    events:
+      - httpApi:
+          path: /summaries/{id}/task-candidates
+          method: POST
+
+  summariesAcceptTasks:
+    handler: src/handlers/summaries.acceptTasks
+    events:
+      - httpApi:
+          path: /summaries/{id}/accept-tasks
+          method: POST
+
+  summariesArchive:
+    handler: src/handlers/summaries.archive
+    events:
+      - httpApi:
+          path: /summaries/{id}/archive
+          method: POST
+
+  # ── Tasks ─────────────────────────────────────────────────────────────────
+  tasksList:
+    handler: src/handlers/tasks.list
+    events:
+      - httpApi:
+          path: /tasks
+          method: GET
+
+  tasksCreate:
+    handler: src/handlers/tasks.create
+    events:
+      - httpApi:
+          path: /tasks
+          method: POST
+
+  tasksGet:
+    handler: src/handlers/tasks.get
+    events:
+      - httpApi:
+          path: /tasks/{id}
+          method: GET
+
+  tasksUpdate:
+    handler: src/handlers/tasks.update
+    events:
+      - httpApi:
+          path: /tasks/{id}
+          method: PATCH
+
+  tasksMarkReviewed:
+    handler: src/handlers/tasks.markReviewed
+    events:
+      - httpApi:
+          path: /tasks/{id}/mark-reviewed
+          method: POST
+
+  tasksMarkActionNeeded:
+    handler: src/handlers/tasks.markActionNeeded
+    events:
+      - httpApi:
+          path: /tasks/{id}/mark-action-needed
+          method: POST
+
+  tasksMarkWaiting:
+    handler: src/handlers/tasks.markWaiting
+    events:
+      - httpApi:
+          path: /tasks/{id}/mark-waiting
+          method: POST
+
+  tasksMarkDone:
+    handler: src/handlers/tasks.markDone
+    events:
+      - httpApi:
+          path: /tasks/{id}/mark-done
+          method: POST
+
+  tasksArchive:
+    handler: src/handlers/tasks.archive
+    events:
+      - httpApi:
+          path: /tasks/{id}/archive
+          method: POST
+
+  # ── Follow-ups ────────────────────────────────────────────────────────────
+  followupsList:
+    handler: src/handlers/followups.list
+    events:
+      - httpApi:
+          path: /followups
+          method: GET
+
+  followupsCreate:
+    handler: src/handlers/followups.create
+    events:
+      - httpApi:
+          path: /followups
+          method: POST
+
+  followupsGet:
+    handler: src/handlers/followups.get
+    events:
+      - httpApi:
+          path: /followups/{id}
+          method: GET
+
+  followupsUpdate:
+    handler: src/handlers/followups.update
+    events:
+      - httpApi:
+          path: /followups/{id}
+          method: PATCH
+
+  followupsMarkReviewed:
+    handler: src/handlers/followups.markReviewed
+    events:
+      - httpApi:
+          path: /followups/{id}/mark-reviewed
+          method: POST
+
+  followupsApprove:
+    handler: src/handlers/followups.approve
+    events:
+      - httpApi:
+          path: /followups/{id}/approve
+          method: POST
+
+  followupsArchive:
+    handler: src/handlers/followups.archive
+    events:
+      - httpApi:
+          path: /followups/{id}/archive
+          method: POST
+
+  # ── Approval Requests ─────────────────────────────────────────────────────
+  approvalsList:
+    handler: src/handlers/approvals.list
+    events:
+      - httpApi:
+          path: /approval-requests
+          method: GET
+
+  approvalsCreate:
+    handler: src/handlers/approvals.create
+    events:
+      - httpApi:
+          path: /approval-requests
+          method: POST
+
+  approvalsApprove:
+    handler: src/handlers/approvals.approve
+    events:
+      - httpApi:
+          path: /approval-requests/{id}/approve
+          method: POST
+
+  approvalsReject:
+    handler: src/handlers/approvals.reject
+    events:
+      - httpApi:
+          path: /approval-requests/{id}/reject
+          method: POST
+
+  approvalsMarkExecuted:
+    handler: src/handlers/approvals.markExecuted
+    events:
+      - httpApi:
+          path: /approval-requests/{id}/mark-executed
+          method: POST
+
+  # ── Agent Endpoints ───────────────────────────────────────────────────────
+  agentSubmitRunResults:
+    handler: src/handlers/agent.submitRunResults
+    events:
+      - httpApi:
+          path: /agent/run-results
+          method: POST
+
+  agentPendingReview:
+    handler: src/handlers/agent.pendingReview
+    events:
+      - httpApi:
+          path: /agent/pending-review
+          method: GET
+
+  agentChanges:
+    handler: src/handlers/agent.changes
+    events:
+      - httpApi:
+          path: /agent/changes
+          method: GET
+
+  agentCreateFollowupDrafts:
+    handler: src/handlers/agent.createFollowupDrafts
+    events:
+      - httpApi:
+          path: /agent/followup-drafts
+          method: POST
+
+  agentCreateApprovalRequests:
+    handler: src/handlers/agent.createApprovalRequests
+    events:
+      - httpApi:
+          path: /agent/approval-requests
+          method: POST
+
+  # ── Audit ─────────────────────────────────────────────────────────────────
+  auditList:
+    handler: src/handlers/audit.list
+    events:
+      - httpApi:
+          path: /audit-events
+          method: GET

@@ -17,6 +17,8 @@
 		AA100008000000000000001A /* FollowUpDraftService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100008000000000000001A /* FollowUpDraftService.swift */; };
 		AA100009000000000000001A /* ImportExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100009000000000000001A /* ImportExportService.swift */; };
 		AA10000A000000000000001A /* SecurityLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000A000000000000001A /* SecurityLockService.swift */; };
+		AA100030000000000000001A /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100030000000000000001A /* APIClient.swift */; };
+		AA100031000000000000001A /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB100031000000000000001A /* SyncService.swift */; };
 		AA10000B000000000000001A /* SummaryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000B000000000000001A /* SummaryViewModel.swift */; };
 		AA10000C000000000000001A /* TaskBoardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000C000000000000001A /* TaskBoardViewModel.swift */; };
 		AA10000D000000000000001A /* FollowUpViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB10000D000000000000001A /* FollowUpViewModel.swift */; };
@@ -53,6 +55,8 @@
 		BB100008000000000000001A /* FollowUpDraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpDraftService.swift; sourceTree = "<group>"; };
 		BB100009000000000000001A /* ImportExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportService.swift; sourceTree = "<group>"; };
 		BB10000A000000000000001A /* SecurityLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLockService.swift; sourceTree = "<group>"; };
+		BB100030000000000000001A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		BB100031000000000000001A /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		BB10000B000000000000001A /* SummaryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryViewModel.swift; sourceTree = "<group>"; };
 		BB10000C000000000000001A /* TaskBoardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardViewModel.swift; sourceTree = "<group>"; };
 		BB10000D000000000000001A /* FollowUpViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpViewModel.swift; sourceTree = "<group>"; };
@@ -133,6 +137,8 @@
 				BB100008000000000000001A /* FollowUpDraftService.swift */,
 				BB100009000000000000001A /* ImportExportService.swift */,
 				BB10000A000000000000001A /* SecurityLockService.swift */,
+				BB100030000000000000001A /* APIClient.swift */,
+				BB100031000000000000001A /* SyncService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -307,6 +313,8 @@
 				AA100008000000000000001A /* FollowUpDraftService.swift in Sources */,
 				AA100009000000000000001A /* ImportExportService.swift in Sources */,
 				AA10000A000000000000001A /* SecurityLockService.swift in Sources */,
+				AA100030000000000000001A /* APIClient.swift in Sources */,
+				AA100031000000000000001A /* SyncService.swift in Sources */,
 				AA10000B000000000000001A /* SummaryViewModel.swift in Sources */,
 				AA10000C000000000000001A /* TaskBoardViewModel.swift in Sources */,
 				AA10000D000000000000001A /* FollowUpViewModel.swift in Sources */,

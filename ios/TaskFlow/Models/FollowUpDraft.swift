@@ -39,6 +39,9 @@ final class FollowUpDraft {
     var approvedAt: Date?
 
     var task: TaskItem?
+    // Backend sync fields
+    var remoteId: String?
+    var isSynced: Bool
 
     // MARK: Computed enum accessors
 
@@ -72,5 +75,6 @@ final class FollowUpDraft {
         self.statusRaw = status.rawValue
         self.createdAt = Date()
         self.updatedAt = Date()
+        self.isSynced = false
     }
 }

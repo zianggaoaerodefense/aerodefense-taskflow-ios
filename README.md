@@ -1,253 +1,242 @@
-# TaskFlow — CTO Workflow iOS App
+# TaskFlow — Private CTO Workflow System
 
-**Phase 1 — Local-only, SwiftUI + SwiftData**
+**Monorepo: iOS App + AWS Lambda Backend + MongoDB**
 
-A private native iPhone app for managing work summaries, action items, and follow-up drafts. Replaces fragile HTML dashboards. The app's local database is the source of truth.
-
----
-
-## Quick Start
-
-1. **Requirements:** Xcode 15+, iOS 17 Simulator or device
-2. Open `TaskFlow.xcodeproj` in Xcode
-3. Select an iPhone simulator (iOS 17+)
-4. Build and run (`⌘R`)
-5. Sample data loads automatically on first launch
-
-> No Apple Developer account required for Simulator. A paid account is required to run on a physical device or submit to TestFlight.
+A private, secure task-management system that turns email, Slack, Jira, meeting notes, and GPT summaries into structured task cards with a full review-and-action workflow.
 
 ---
 
 ## Architecture
 
 ```
-TaskFlow/
-├── TaskFlowApp.swift              # @main entry, SwiftData container
-├── Info.plist
-├── Assets.xcassets
+iPhone SwiftUI App (primary UI, local cache)
+        ↕ HTTPS
+AWS API Gateway
+        ↕
+AWS Lambda (Node.js/TypeScript)
+        ↕
+MongoDB Cloud Database
+
+GPT Management Agent
+        ↕ HTTPS
+AWS API Gateway  (same endpoint)
+        ↕
+AWS Lambda
+        ↕
+MongoDB Cloud Database
+```
+
+**The app and GPT agent never connect to MongoDB directly. All reads/writes go through Lambda.**
+
+---
+
+## Repository Structure
+
+```
+/
+├── ios/                              # iPhone SwiftUI app
+│   ├── TaskFlow.xcodeproj/
+│   └── TaskFlow/
+│       ├── Models/                   # SwiftData @Model classes
+│       ├── Services/                 # APIClient, SyncService, SummaryParser, etc.
+│       ├── ViewModels/               # @Observable view models
+│       ├── Views/                    # SwiftUI views (4 tabs)
+│       └── Resources/               # SampleData
 │
-├── Models/
-│   ├── Summary.swift              # @Model: Summary + SummarySection
-│   ├── TaskItem.swift             # @Model: TaskItem + TaskStatus/Priority/ResourceType enums
-│   ├── FollowUpDraft.swift        # @Model: FollowUpDraft + ChannelType/DraftStatus enums
-│   └── AppSettings.swift          # @Model: AppSettings singleton + ExportFormat enum
+├── backend/                          # AWS Lambda backend
+│   ├── src/
+│   │   ├── handlers/                 # Lambda function handlers
+│   │   ├── services/                 # Audit service, business logic
+│   │   ├── db/
+│   │   │   ├── connection.ts         # MongoDB connection pooling
+│   │   │   └── repositories/        # userId-scoped data access layer
+│   │   ├── models/
+│   │   │   └── types.ts             # TypeScript interfaces
+│   │   ├── middleware/               # withAuth, requireScope
+│   │   ├── auth/                     # JWT verification, AuthContext
+│   │   ├── schemas/                  # Zod validation schemas
+│   │   └── utils/                    # response helpers, error handling
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── serverless.yml
+│   └── .env.example
 │
-├── Services/
-│   ├── SummaryParser.swift        # Deterministic markdown/text → sections parser
-│   ├── TaskExtractionService.swift # Action-verb-based task extraction (no AI)
-│   ├── FollowUpDraftService.swift  # Template-based follow-up draft generator
-│   ├── ImportExportService.swift   # JSON + Markdown export/import with Codable DTOs
-│   └── SecurityLockService.swift   # LocalAuthentication wrapper + SecurityLockView
+├── shared/
+│   └── schemas/                      # JSON Schema (task, summary, followup, agent)
 │
-├── ViewModels/
-│   ├── SummaryViewModel.swift
-│   ├── TaskBoardViewModel.swift
-│   ├── FollowUpViewModel.swift
-│   └── SettingsViewModel.swift
+├── docs/
+│   ├── architecture.md
+│   ├── api.md
+│   ├── security.md
+│   └── deployment.md
 │
-├── Views/
-│   ├── RootTabView.swift           # Bottom tab navigation
-│   ├── Summaries/
-│   │   ├── SummaryListView.swift
-│   │   ├── SummaryDetailView.swift
-│   │   ├── AddSummaryView.swift
-│   │   └── TaskExtractionPreviewView.swift
-│   ├── Tasks/
-│   │   ├── TaskBoardView.swift
-│   │   ├── TaskCardView.swift
-│   │   ├── TaskDetailView.swift
-│   │   ├── EditTaskView.swift
-│   │   └── TaskComponents.swift   # CardContainer, SectionHeaderRow
-│   ├── FollowUps/
-│   │   ├── FollowUpListView.swift
-│   │   └── FollowUpDetailView.swift
-│   ├── Settings/
-│   │   └── SettingsView.swift
-│   └── Components/
-│       ├── StatusChip.swift
-│       ├── PriorityBadge.swift
-│       ├── ResourceTypeBadge.swift
-│       └── SharedComponents.swift  # DraftStatusBadge, ChannelTypeIcon, EmptyStateView, etc.
-│
-└── Resources/
-    └── SampleData.swift            # Sample summaries/tasks for preview (source = "sample")
+└── README.md
 ```
 
 ---
 
-## Data Schema (v1.0)
+## Quick Start
 
-### Summary
-| Field | Type | Notes |
-|-------|------|-------|
-| id | UUID | Unique |
-| title | String | |
-| dateCreated | Date | |
-| dateUpdated | Date | |
-| source | String? | "manual", "GPT memory", "import", "sample" |
-| rawText | String | Full pasted/imported text |
-| tags | [String] | |
-| sections | [SummarySection] | Cascade delete |
-| linkedTasks | [TaskItem] | |
+### Backend (local dev)
 
-### SummarySection
-| Field | Type |
-|-------|------|
-| id | UUID |
-| heading | String |
-| body | String |
-| extractedBullets | [String] |
-
-### TaskItem
-| Field | Type | Notes |
-|-------|------|-------|
-| id | UUID | |
-| title | String | |
-| details | String | |
-| sourceSummaryID | UUID? | |
-| sourceSummaryTitle | String? | Denormalized for display |
-| status | TaskStatus | new / reviewed / waiting / done |
-| priority | TaskPriority | low / normal / high / urgent |
-| targetCompletionDate | Date? | |
-| actualCompletionDate | Date? | |
-| requesterName | String? | |
-| requesterContact | String? | |
-| resourceType | ResourceType | email / slack / jira / github / document / other |
-| resourceLabel | String? | e.g. "ARCH-421" |
-| resourceURL | String? | |
-| notes | String | |
-| createdAt / updatedAt / doneAt | Date | |
-| followUpDraft | FollowUpDraft? | Auto-created on Done |
-
-### FollowUpDraft
-| Field | Type | Notes |
-|-------|------|-------|
-| id | UUID | |
-| taskID | UUID | |
-| channelType | ChannelType | email / slack / jira / other |
-| recipientOrTarget | String? | |
-| subject | String? | Email only |
-| body | String | Template-generated, user-editable |
-| draftStatus | DraftStatus | draft / reviewed / approved / sentExternally / archived |
-| createdAt / updatedAt / approvedAt | Date | |
-
-### AppSettings (singleton)
-| Field | Type | Default |
-|-------|------|---------|
-| requireFaceID | Bool | false |
-| appDisplayName | String | "TaskFlow" |
-| exportFormatPreference | ExportFormat | json |
-| agentSyncEnabled | Bool | false (Phase 2 placeholder) |
-| defaultTaskPriority | TaskPriority | normal |
-| defaultResourceType | ResourceType | other |
-
----
-
-## JSON Export Format
-
-```json
-{
-  "schemaVersion": "1.0",
-  "exportedAt": "2025-01-01T00:00:00Z",
-  "summaries": [...],
-  "tasks": [...],
-  "followUpDrafts": [...]
-}
+```bash
+cd backend
+npm install
+cp .env.example .env
+# Fill in MONGODB_URI and JWT_SECRET in .env
+npm run dev
 ```
 
-Dates use ISO 8601. Import merges by inserting new objects; existing records are not deduplicated automatically.
+### iOS
 
----
-
-## Security
-
-- **Local only.** No network calls, no analytics, no telemetry in Phase 1.
-- **No secrets.** No API keys, tokens, or credentials in the codebase.
-- **Face ID / Passcode** lock via `LocalAuthentication`. Toggle in Settings.
-- **Export warning** shown before any data export (files may contain sensitive work information).
-- **No UserDefaults** for sensitive content — all task/summary data in SwiftData (on-device encrypted store).
-- **Sensitive data handling:** treat summaries and tasks as internal/confidential. Do not commit exported JSON files.
-
----
-
-## GPT / AI Agent Compatibility
-
-Phase 1 is deliberately local and offline. A GPT management agent can interact via:
-
-1. **Export → Process → Import:** Export JSON from the app, pass to a GPT agent for analysis or enrichment, re-import the modified JSON.
-2. **Markdown export:** Individual summaries and their tasks can be exported as clean Markdown for LLM context.
-
-**The app database is the source of truth. ChatGPT memory is not.**
-
-### Future agent integration TODOs
-
-```swift
-// TODO: Phase 2 — Backend API endpoint for agent sync
-// TODO: Phase 2 — Gmail draft integration (requires OAuth, OAuth credentials via environment only)
-// TODO: Phase 2 — Slack draft send via Slack API (requires Bot token, stored in Keychain)
-// TODO: Phase 2 — Jira issue lookup and comment post via Jira REST API
-// TODO: Phase 2 — GPT-powered task extraction (replace deterministic parser with API call, opt-in)
-// TODO: Phase 2 — Approval/send workflow with confirmation UI before any external transmission
-// TODO: Phase 2 — iCloud sync option (CloudKit container, user consent required)
+```bash
+open ios/TaskFlow.xcodeproj
+# Select iPhone simulator (iOS 17+)
+# In Settings tab, set API URL (default: http://localhost:3000 for dev)
+# Press ⌘R
 ```
 
-Services are intentionally kept separate and stateless so a future agent can call them directly:
-- `TaskExtractionService.extractSuggestions(from:)` — swap implementation for GPT in Phase 2
-- `FollowUpDraftService.generateDraft(for:)` — swap templates for GPT-generated text
-- `ImportExportService` — clean boundary for agent data handoff
+---
+
+## Security Model
+
+| Rule | Implementation |
+|------|---------------|
+| `userId` never trusted from client | Derived from verified JWT in every handler |
+| All DB queries scoped by userId+orgId | Every repo method requires AuthContext |
+| MongoDB only from Lambda | No DB credentials in app or agent |
+| MongoDB URI in env vars | `.env` locally, AWS Secrets Manager in prod |
+| Agent tokens have explicit scopes | Scopes checked via `requireScope()` |
+| External actions require approval | `approval_requests` collection, status=pending until approved |
+| No secrets committed | `.gitignore` blocks `.env`, `*.p12`, `AuthKey_*.p8` |
+| Audit log for all mutations | `audit_events` collection via `auditService.ts` |
+| Face ID / Passcode on iOS | `LocalAuthentication` in `SecurityLockService.swift` |
 
 ---
 
-## TestFlight Deployment
+## Data Flow
 
-Phase 1 does not include CI/CD. When ready:
+### User adds a task
+1. App inserts local SwiftData record (optimistic)
+2. `SyncService.pushTaskUpdate()` calls `POST /tasks`
+3. Lambda verifies token, inserts with `userId` from auth
+4. Returns `remoteId` → stored on local record (`isSynced = true`)
 
-1. **Apple Developer account** required ($99/year)
-2. Keep repo **private** (contains internal work context in sample data)
-3. Options:
-   - **Xcode Cloud** (simplest — built into Xcode 13+)
-   - **GitHub Actions + Fastlane** (`match` for code signing, `gym` for build, `pilot` for upload)
-   - **Codemagic** (CI/CD SaaS with iOS support)
-4. **Never commit:**
-   - `.p12` / `.mobileprovision` files
-   - Apple credentials (`APPLE_ID`, `APP_SPECIFIC_PASSWORD`, `ASC_API_KEY`)
-   - Use repository secrets / environment variables for all credentials
-5. `PRODUCT_BUNDLE_IDENTIFIER` is `com.taskflow.app` — change before provisioning
+### GPT agent submits a work summary
+1. Agent calls `POST /agent/run-results` with agent JWT
+2. Lambda verifies agent token + scope `agent:summaries:create`
+3. Lambda inserts summaries and task candidates under correct `userId`/`orgId`
+4. App syncs → shows new items in Summaries tab (reviewNeeded flag set)
+5. User reviews task candidates, accepts selected ones
+6. Accepted tasks move to task board
 
----
-
-## Configuration
-
-### Change the app name
-Update `appDisplayName` in Settings (persisted in AppSettings). To change the binary name, update `PRODUCT_NAME` in `project.pbxproj` and `CFBundleDisplayName` in `Info.plist`.
-
-### Change bundle identifier
-Edit `PRODUCT_BUNDLE_IDENTIFIER` in `project.pbxproj` (both Debug and Release configurations).
-
-### Deployment target
-iOS 17.0 (required for SwiftData and `@Observable`). Update `IPHONEOS_DEPLOYMENT_TARGET` in both build configurations to change.
+### Task marked Done
+1. App calls `POST /tasks/:id/mark-done`
+2. Lambda sets `doneAt`, `actualCompletionDate`, status=`done`
+3. Lambda auto-generates follow-up draft from template
+4. Draft returned to app, shown in Follow-ups tab
+5. User reviews/approves draft (status=`approved`)
+6. Phase 2: approved draft triggers `approval_request` → user confirms → external send
 
 ---
 
-## Phase 1 Limitations (by design)
+## MongoDB Collections
 
-| Feature | Status |
-|---------|--------|
-| Gmail sending | Not implemented — draft only |
-| Slack sending | Not implemented — draft only |
-| Jira API write | Not implemented — link + draft only |
-| Cloud sync | Not implemented |
-| Push notifications | Not implemented |
-| AI-powered extraction | Not implemented — deterministic parser only |
-| App Store / TestFlight | Not configured — requires Apple Developer account |
-| Analytics | Intentionally absent |
+| Collection | Purpose |
+|-----------|---------|
+| `users` | User accounts and roles |
+| `summaries` | Work summaries from all sources |
+| `tasks` | Task cards (system of record) |
+| `followup_drafts` | Generated follow-up drafts |
+| `source_refs` | External source metadata (Slack threads, Jira tickets) |
+| `agent_runs` | Agent run metadata and status |
+| `approval_requests` | Pending external actions awaiting user approval |
+| `audit_events` | Immutable audit trail for all mutations |
+| `sync_events` | iOS/backend sync state tracking |
 
 ---
 
-## Development Notes
+## API Overview
 
-- `@Observable` macro requires iOS 17+
-- SwiftData `@Model` classes must be `final class`
-- `@Relationship` inverse declarations prevent orphaned records
-- `AppSettings` is a singleton — fetch first record, insert default if empty (handled in `SettingsViewModel.loadOrCreateSettings`)
-- Sample data is identified by `source == "sample"` and can be cleared without affecting user data
+Full docs: `docs/api.md`
+
+| Group | Endpoints |
+|-------|----------|
+| Health/Auth | `GET /health`, `GET /me` |
+| Summaries | `GET/POST /summaries`, `GET/PATCH /summaries/:id`, `/accept-tasks`, `/archive` |
+| Tasks | `GET/POST /tasks`, `GET/PATCH /tasks/:id`, `/mark-reviewed`, `/mark-action-needed`, `/mark-waiting`, `/mark-done`, `/archive` |
+| Follow-ups | `GET/POST /followups`, `GET/PATCH /followups/:id`, `/mark-reviewed`, `/approve`, `/archive` |
+| Approvals | `GET/POST /approval-requests`, `/:id/approve`, `/:id/reject`, `/:id/mark-executed` |
+| Agent | `POST /agent/run-results`, `GET /agent/pending-review`, `GET /agent/changes`, `POST /agent/followup-drafts`, `POST /agent/approval-requests` |
+| Audit | `GET /audit-events` |
+
+### Agent scopes
+```
+agent:summaries:create
+agent:tasks:read
+agent:tasks:suggest
+agent:followups:draft
+agent:approvals:create
+```
+
+The agent cannot send externally. All external actions go through `approval_requests`.
+
+---
+
+## Task Status Flow
+
+```
+new → reviewNeeded → actionNeeded → done → archived
+             ↓                ↓
+           waiting          waiting
+```
+
+Status colors: new=blue, reviewNeeded=purple, actionNeeded=orange, waiting=yellow, done=green, archived=gray
+
+---
+
+## Phase Roadmap
+
+| Feature | Phase |
+|---------|-------|
+| Local SwiftData cache | ✅ Phase 1 |
+| AWS Lambda + MongoDB backend | ✅ Phase 2 (current) |
+| Face ID lock | ✅ Phase 1 |
+| JSON export/import (debug only) | ✅ Phase 1 |
+| API sync (backend as source of truth) | ✅ Phase 2 (current) |
+| Agent handoff via `/agent/run-results` | ✅ Phase 2 (current) |
+| Gmail integration (read + draft) | Phase 3 |
+| Slack integration (read + draft) | Phase 3 |
+| Jira integration (read + comment) | Phase 3 |
+| Email send via approval | Phase 3 |
+| Slack send via approval | Phase 3 |
+| Push notifications | Phase 3 |
+| iCloud sync | Phase 3 |
+| TestFlight distribution | Phase 3 |
+| App Store | Not planned |
+
+---
+
+## Non-Goals (Current Phase)
+
+- No automatic external sending (email, Slack, Jira) — approval required
+- No public App Store release
+- No direct MongoDB access from iOS app
+- No direct MongoDB access from GPT agent
+- No committed secrets
+- No analytics
+- No Supabase/Vercel
+- No ChatGPT memory as database
+
+---
+
+## Security Notes
+
+See `docs/security.md` for full details.
+
+**Never commit:**
+- `.env` files
+- `*.p12` / `*.mobileprovision` / `AuthKey_*.p8`
+- MongoDB credentials
+- JWT secrets
+- Exported task data JSON files (`taskflow-export*.json`)

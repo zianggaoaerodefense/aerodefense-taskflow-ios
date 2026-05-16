@@ -4,16 +4,32 @@ import SwiftData
 // MARK: - Enums
 
 enum TaskStatus: String, Codable, CaseIterable {
-    case new, reviewed, waiting, done
+    case new
+    case reviewNeeded
+    case actionNeeded
+    case waiting
+    case done
+    case archived
 
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .new:          return "New"
+        case .reviewNeeded: return "Review Needed"
+        case .actionNeeded: return "Action Needed"
+        case .waiting:      return "Waiting"
+        case .done:         return "Done"
+        case .archived:     return "Archived"
+        }
+    }
 
     var color: Color {
         switch self {
-        case .new:      return .blue
-        case .reviewed: return .orange
-        case .waiting:  return .yellow
-        case .done:     return .green
+        case .new:          return .blue
+        case .reviewNeeded: return .purple
+        case .actionNeeded: return .orange
+        case .waiting:      return .yellow
+        case .done:         return .green
+        case .archived:     return .gray
         }
     }
 }
@@ -72,6 +88,10 @@ final class TaskItem {
     var createdAt: Date
     var updatedAt: Date
     var doneAt: Date?
+    var reviewedAt: Date?
+    // Backend sync fields
+    var remoteId: String?
+    var isSynced: Bool
 
     var sourceSummary: Summary?
 
@@ -131,5 +151,6 @@ final class TaskItem {
         self.actualCompletionDate = actualCompletionDate
         self.createdAt = Date()
         self.updatedAt = Date()
+        self.isSynced = false
     }
 }
