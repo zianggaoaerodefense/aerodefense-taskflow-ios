@@ -34,6 +34,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="workflows"
+        options={{
+          title: 'Workflows',
+          tabBarIcon: tabIcon('git-branch', 'git-branch-outline'),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',

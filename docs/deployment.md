@@ -8,8 +8,10 @@
 
 - [Supabase CLI](https://supabase.com/docs/guides/cli) (`brew install supabase/tap/supabase` or `npm i -g supabase`)
 - Docker (required by Supabase CLI for local Postgres + Studio)
-- Node.js 20+ (for `packages/shared`)
-- Xcode 15+, iOS 17 simulator or device, macOS 14+
+- Node.js 20+ and npm
+- [EAS CLI](https://docs.expo.dev/build/introduction/) for production builds: `npm install -g eas-cli`
+- Xcode 15+ for iOS Simulator (macOS only)
+- Android Studio for Android Emulator (optional)
 
 ### Start local Supabase stack
 
@@ -54,20 +56,24 @@ curl -X GET http://localhost:54321/functions/v1/agent-context \
   -H "X-Agent-Token: <your-test-token>"
 ```
 
-### iOS app (local dev)
+### Expo app (local dev)
 
-1. Open `ios/TaskFlow.xcodeproj` in Xcode.
-2. Add the Supabase Swift SDK via Swift Package Manager:
-   - **File → Add Package Dependencies**
-   - URL: `https://github.com/supabase/supabase-swift`
-   - Version: Up to Next Major (2.x)
-   - Products: `Supabase`, `Realtime`
-3. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to your target's `Info.plist`:
-   - `SUPABASE_URL` → `http://127.0.0.1:54321` (local dev) or your project URL (staging/prod)
-   - `SUPABASE_ANON_KEY` → the local anon key printed by `supabase start`
-4. Select a simulator target (iPhone 15, iOS 17+) and press `Cmd+R`.
+1. Copy the environment file:
+   ```bash
+   cp app/.env.example app/.env
+   ```
+2. Set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from **Supabase → Settings → API** (use local values from `supabase start` output).
+3. Install dependencies:
+   ```bash
+   cd app && npm install
+   ```
+4. Start the development server:
+   ```bash
+   npx expo start
+   ```
+5. Press `i` for iOS Simulator, `a` for Android Emulator, or scan the QR code with the Expo Go app on a physical device.
 
-For device builds, use a staging environment URL (the local `127.0.0.1` address is not reachable from a physical device on a different network).
+For a physical device, use your staging Supabase project URL (not `127.0.0.1` — a phone cannot reach your laptop's local server).
 
 ---
 
@@ -132,7 +138,7 @@ Keep staging and production as completely separate Supabase projects. Never shar
 |---|---|---|
 | Project | `taskflow-staging` | `taskflow-prod` |
 | Migrations | Applied from same repo | Applied from same repo |
-| iOS build | Points to staging URL | Points to prod URL |
+| Expo build | Points to staging URL via EXPO_PUBLIC_SUPABASE_URL | Points to prod URL via EXPO_PUBLIC_SUPABASE_URL |
 | Secrets | Staging values | Production values |
 | Agent tokens | Separate tokens per user | Separate tokens per user |
 
