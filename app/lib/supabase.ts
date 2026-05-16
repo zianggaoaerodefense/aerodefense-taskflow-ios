@@ -62,9 +62,10 @@ const SecureStoreAdapter = {
       for (let i = 0; i < count; i++) {
         await SecureStore.deleteItemAsync(`${key}__${i}`)
       }
-    } else {
-      await SecureStore.deleteItemAsync(key)
     }
+    // Always delete the base key — it may coexist with chunk keys from a
+    // previous write that didn't clean up both representations.
+    await SecureStore.deleteItemAsync(key)
   },
 }
 
