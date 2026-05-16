@@ -86,7 +86,7 @@ export function parseBody<T>(event: { body: string | null }): T {
  * is absent — which should not happen if serverless.yml routes are correct.
  */
 export function getPathParam(
-  event: { pathParameters: Record<string, string> | null },
+  event: { pathParameters: Record<string, string | undefined> | null },
   key: string,
 ): string {
   const val = event.pathParameters?.[key];
@@ -100,7 +100,7 @@ export function getPathParam(
  * Extracts an optional query-string parameter, returning undefined when absent.
  */
 export function getQueryParam(
-  event: { queryStringParameters: Record<string, string> | null | undefined },
+  event: { queryStringParameters: Record<string, string | undefined> | null | undefined },
   key: string,
 ): string | undefined {
   return event.queryStringParameters?.[key] ?? undefined;
