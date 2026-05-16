@@ -19,16 +19,16 @@ import {
   findSummaryById,
   insertSummary,
   updateSummary,
+  addTaskCandidates,
   addLinkedTask,
   archiveSummary,
 } from '../db/repositories/summaryRepo';
-import { insertTask } from '../db/repositories/taskRepo';
 import { insertAuditEvent } from '../db/repositories/auditRepo';
 import {
   CreateSummarySchema,
   UpdateSummarySchema,
+  AcceptTasksSchema,
 } from '../schemas/summary';
-import { CreateTaskSchema as FullCreateTaskSchema } from '../schemas/validation';
 import {
   successResponse,
   errorResponse,
@@ -36,76 +36,11 @@ import {
   getPathParam,
   getQueryParam,
 } from '../utils/response';
-import { handleError, NotFoundError, BadRequestError } from '../utils/errors';
-import { SummaryDoc, SummaryDTO, TaskDoc, TaskPriority, toId, toISOString } from '../models/types';
+import { handleError, NotFoundError } from '../utils/errors';
+import { SummaryDoc, SummaryDTO, toId } from '../models/types';
 
 // ---------------------------------------------------------------------------
-// Action-verb list for lightweight task-candidate extraction (stub)
-// ---------------------------------------------------------------------------
-
-const ACTION_VERBS: string[] = [
-  'follow up', 'send', 'review', 'check', 'create', 'update', 'finish',
-  'test', 'verify', 'prepare', 'schedule', 'draft', 'ask', 'confirm',
-  'investigate', 'implement', 'deploy', 'document', 'provide', 'share', 'discuss',
-];
-
-export interface TaskCandidate {
-  title: string;
-  details: string;
-  sectionContext: string;
-  suggestedResourceType: string;
-  suggestedPriority: TaskPriority;
-}
-
-/** Returns true when text contains one of the action verbs at a word boundary. */
-function containsActionVerb(text: string): boolean {
-  const lower = text.toLowerCase();
-  return ACTION_VERBS.some((verb) => {
-    const idx = lower.indexOf(verb);
-    if (idx === -1) return false;
-    const before = idx === 0 ? '' : lower[idx - 1];
-    const after = lower[idx + verb.length] ?? '';
-    return (before === '' || !/\w/.test(before)) && (after === '' || !/\w/.test(after));
-  });
-}
-
-/**
- * Stub task-candidate extractor.
- * Scans rawText lines and section extractedBullets for action verbs.
- * Returns candidates WITHOUT inserting anything.
- */
-function extractTaskCandidates(summary: SummaryDoc): TaskCandidate[] {
-  const candidates: TaskCandidate[] = [];
-  const defaultPriority: TaskPriority = summary.suggestedPriority ?? 'normal';
-
-  for (const line of summary.rawText.split('\n')) {
-    const t = line.trim();
-    if (t && containsActionVerb(t)) {
-      candidates.push({ title: t.slice(0, 200), details: t, sectionContext: 'rawText', suggestedResourceType: 'other', suggestedPriority: defaultPriority });
-    }
-  }
-
-  for (const section of summary.structured.sections ?? []) {
-    for (const bullet of section.extractedBullets ?? []) {
-      const t = bullet.trim();
-      if (t && containsActionVerb(t)) {
-        candidates.push({ title: t.slice(0, 200), details: t, sectionContext: section.heading || section.id, suggestedResourceType: 'other', suggestedPriority: defaultPriority });
-      }
-    }
-  }
-
-  // Deduplicate by title (case-insensitive).
-  const seen = new Set<string>();
-  return candidates.filter((c) => {
-    const key = c.title.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-// ---------------------------------------------------------------------------
-// DTO mappers
+// DTO mapper
 // ---------------------------------------------------------------------------
 
 function toSummaryDTO(doc: SummaryDoc): SummaryDTO {
@@ -128,53 +63,26 @@ function toSummaryDTO(doc: SummaryDoc): SummaryDTO {
   };
 }
 
-function toTaskDTO(doc: TaskDoc) {
-  return {
-    id: toId(doc),
-    userId: doc.userId,
-    orgId: doc.orgId,
-    summaryId: doc.summaryId,
-    title: doc.title,
-    details: doc.details,
-    status: doc.status,
-    priority: doc.priority,
-    requesterName: doc.requesterName,
-    requesterContact: doc.requesterContact,
-    resourceType: doc.resourceType,
-    resourceLabel: doc.resourceLabel,
-    resourceUrl: doc.resourceUrl,
-    targetCompletionDate: toISOString(doc.targetCompletionDate),
-    actualCompletionDate: toISOString(doc.actualCompletionDate),
-    reviewedAt: toISOString(doc.reviewedAt),
-    doneAt: toISOString(doc.doneAt),
-    notes: doc.notes,
-    followUpDraftId: doc.followUpDraftId,
-    createdBy: doc.createdBy,
-    createdAt: doc.createdAt.toISOString(),
-    updatedAt: doc.updatedAt.toISOString(),
-  };
-}
-
 // ---------------------------------------------------------------------------
-// GET /summaries — optional ?status=, ?limit=, ?skip=
+// GET /summaries
 // ---------------------------------------------------------------------------
 
 export const list = withAuth(
   async (event: APIGatewayProxyEvent, auth: AuthContext): Promise<APIGatewayProxyResult> => {
     try {
       const db = await getDb();
-      const status = getQueryParam(event, 'status');
       const limitStr = getQueryParam(event, 'limit');
       const skipStr = getQueryParam(event, 'skip');
-      const limit = limitStr ? Math.min(Math.max(parseInt(limitStr, 10) || 50, 1), 200) : 50;
-      const skip = skipStr ? Math.max(parseInt(skipStr, 10) || 0, 0) : 0;
+      const reviewNeededStr = getQueryParam(event, 'reviewNeeded');
+      const actionNeededStr = getQueryParam(event, 'actionNeeded');
 
-      const opts: Parameters<typeof findSummaries>[2] = { limit, skip };
-      if (status === 'archived') opts.includeArchived = true;
-      else if (status === 'reviewNeeded') opts.reviewNeeded = true;
-      else if (status === 'actionNeeded') opts.actionNeeded = true;
+      const summaries = await findSummaries(db, auth, {
+        reviewNeeded: reviewNeededStr === 'true' ? true : reviewNeededStr === 'false' ? false : undefined,
+        actionNeeded: actionNeededStr === 'true' ? true : actionNeededStr === 'false' ? false : undefined,
+        limit: limitStr ? Math.min(parseInt(limitStr, 10), 200) : 100,
+        skip: skipStr ? parseInt(skipStr, 10) : 0,
+      });
 
-      const summaries = await findSummaries(db, auth, opts);
       return successResponse({ summaries: summaries.map(toSummaryDTO) });
     } catch (err) {
       return handleError(err);
@@ -189,7 +97,6 @@ export const list = withAuth(
 export const create = withAuth(
   async (event: APIGatewayProxyEvent, auth: AuthContext): Promise<APIGatewayProxyResult> => {
     try {
-      // Agent must have SUMMARIES_CREATE scope; users are permitted freely.
       if (auth.type === 'agent') {
         requireScope(auth, AGENT_SCOPES.SUMMARIES_CREATE);
       }
@@ -215,7 +122,6 @@ export const create = withAuth(
         action: 'summary.create',
         entityType: 'summary',
         entityId: toId(doc),
-        after: { title: doc.title, sourceType: doc.sourceType },
       });
 
       return successResponse({ summary: toSummaryDTO(doc) }, 201);
@@ -267,8 +173,6 @@ export const update = withAuth(
         action: 'summary.update',
         entityType: 'summary',
         entityId: id,
-        before: { title: before.title, reviewNeeded: before.reviewNeeded, actionNeeded: before.actionNeeded },
-        after: { title: updated.title, reviewNeeded: updated.reviewNeeded, actionNeeded: updated.actionNeeded },
       });
 
       return successResponse({ summary: toSummaryDTO(updated) });
@@ -295,7 +199,6 @@ export const taskCandidates = withAuth(
       const summary = await findSummaryById(db, auth, id);
       if (!summary) throw new NotFoundError('Summary');
 
-      // The body is an array of candidate task IDs (already created tasks).
       const body = parseBody<unknown>(event);
       const { candidateIds } = (body as { candidateIds: string[] });
       if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
@@ -327,11 +230,9 @@ export const acceptTasks = withAuth(
       const summary = await findSummaryById(db, auth, id);
       if (!summary) throw new NotFoundError('Summary');
 
-      // Move accepted IDs from candidateIds to linkedTaskIds.
       const updated = await addLinkedTask(db, auth, id, input.taskCandidateIds[0]);
       if (!updated) throw new NotFoundError('Summary');
 
-      // For all accepted IDs, link them.
       for (const taskId of input.taskCandidateIds.slice(1)) {
         await addLinkedTask(db, auth, id, taskId);
       }

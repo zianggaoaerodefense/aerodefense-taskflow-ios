@@ -172,7 +172,7 @@ private typealias APIErrorBody = APIErrorResponse
 // MARK: - API Client
 
 @MainActor
-final class APIClient {
+final class APIClient: ObservableObject {
     static let shared = APIClient()
 
     private let session: URLSession
@@ -244,12 +244,20 @@ final class APIClient {
         return resp.items
     }
 
+    /// Create a task from a typed parameter list. Do NOT include userId or orgId.
     func createTask(title: String, details: String, status: String, priority: String,
                     resourceType: String, notes: String, summaryId: String? = nil,
                     requesterName: String? = nil) async throws -> APITask {
         let b = try body(["title": title, "details": details, "status": status,
                           "priority": priority, "resourceType": resourceType,
                           "notes": notes, "summaryId": summaryId, "requesterName": requesterName])
+        return try await perform(try request("/tasks", method: "POST", body: b))
+    }
+
+    /// Create a task from a pre-assembled dictionary (used by SyncService).
+    /// Do NOT include userId or orgId in the dictionary.
+    func createTask(_ dict: [String: Any]) async throws -> APITask {
+        let b = try JSONSerialization.data(withJSONObject: dict)
         return try await perform(try request("/tasks", method: "POST", body: b))
     }
 
@@ -285,10 +293,17 @@ final class APIClient {
         return resp.items
     }
 
+    /// Create a summary from typed parameters.
     func createSummary(title: String, rawText: String, sourceType: String, tags: [String]) async throws -> APISummary {
         let b = try JSONSerialization.data(withJSONObject: [
             "title": title, "rawText": rawText, "sourceType": sourceType, "tags": tags
         ])
+        return try await perform(try request("/summaries", method: "POST", body: b))
+    }
+
+    /// Create a summary from a pre-assembled dictionary (used by SyncService).
+    func createSummary(_ dict: [String: Any]) async throws -> APISummary {
+        let b = try JSONSerialization.data(withJSONObject: dict)
         return try await perform(try request("/summaries", method: "POST", body: b))
     }
 
