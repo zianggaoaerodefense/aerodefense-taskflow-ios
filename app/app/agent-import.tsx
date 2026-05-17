@@ -10,6 +10,7 @@
 //   any data is written.
 
 import { useRef, useState } from 'react'
+import { router } from 'expo-router'
 import {
   ActivityIndicator,
   Alert,
@@ -132,6 +133,9 @@ export default function AgentImportScreen() {
             <ResultLine label="Workflows created" value={result.workflowCount} />
             {result.hasSummary && <ResultLine label="Summary saved" value="Yes" />}
           </View>
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/')}>
+            <Text style={styles.primaryBtnText}>View Tasks</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryBtn} onPress={handleReset}>
             <Text style={styles.secondaryBtnText}>Import another</Text>
           </TouchableOpacity>

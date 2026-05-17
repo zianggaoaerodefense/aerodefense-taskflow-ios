@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useFocusEffect } from 'expo-router'
 import {
   Alert,
   Animated,
@@ -73,6 +74,10 @@ export default function TasksScreen() {
   }, [])
 
   useEffect(() => { load(true) }, [load])
+
+  // Re-fetch whenever the tab becomes focused so agent imports are visible
+  // immediately after navigating back from the import screen.
+  useFocusEffect(useCallback(() => { load(true) }, [load]))
 
   // Realtime subscription: refresh when the agent creates or updates a task
   useEffect(() => {
@@ -211,6 +216,7 @@ function SwipeableTaskCard({
   onArchiveRef.current = onArchive
   onReopenRef.current = onReopen
 
+
   const translateX = useRef(new Animated.Value(0)).current
   // Track the flattened position so we can read it without accessing _value.
   const positionRef = useRef(0)
@@ -288,37 +294,69 @@ function SwipeableTaskCard({
       </View>
 
       <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
-        <TaskCard task={task} onComplete={() => { snapClose(); onComplete() }} />
+        <TaskCard
+          task={task}
+          onComplete={() => { snapClose(); onComplete() }}
+          onIgnore={() => { snapClose(); onArchiveRef.current() }}
+        />
       </Animated.View>
     </View>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Task card (display only — no gesture logic)
+// Helpers
 // ---------------------------------------------------------------------------
 
-function TaskCard({ task, onComplete }: { task: Task; onComplete: () => void }) {
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Task card — tappable to expand; ✓ / ✕ inline action buttons
+// ---------------------------------------------------------------------------
+
+function TaskCard({ task, onComplete, onIgnore }: {
+  task: Task
+  onComplete: () => void
+  onIgnore: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
   const statusColor = STATUS_COLOR[task.status] ?? '#8E8E93'
   const priorityColor = PRIORITY_COLOR[task.priority] ?? '#8E8E93'
+  const isActive = task.status !== 'done' && task.status !== 'archived'
 
   return (
     <View style={[styles.card, { borderLeftColor: statusColor }]}>
-      <View style={styles.cardTop}>
-        <Text style={styles.cardTitle} numberOfLines={2}>
-          {task.title}
-        </Text>
-        <View style={[styles.chip, { backgroundColor: statusColor }]}>
-          <Text style={styles.chipText}>{STATUS_LABEL[task.status]}</Text>
+      {/* Tappable region: title + description */}
+      <Pressable onPress={() => setExpanded(v => !v)}>
+        <View style={styles.cardTop}>
+          <Text style={styles.cardTitle} numberOfLines={expanded ? undefined : 2}>
+            {task.title}
+          </Text>
+          <View style={styles.cardTopRight}>
+            <View style={[styles.chip, { backgroundColor: statusColor }]}>
+              <Text style={styles.chipText}>{STATUS_LABEL[task.status]}</Text>
+            </View>
+            <Text style={styles.chevron}>{expanded ? '▴' : '▾'}</Text>
+          </View>
         </View>
-      </View>
 
-      {task.description ? (
-        <Text style={styles.cardDesc} numberOfLines={2}>
-          {task.description}
-        </Text>
-      ) : null}
+        {task.description ? (
+          <Text style={styles.cardDesc} numberOfLines={expanded ? undefined : 2}>
+            {task.description}
+          </Text>
+        ) : null}
+      </Pressable>
 
+      {/* Metadata + action buttons */}
       <View style={styles.cardBottom}>
         <Text style={[styles.priority, { color: priorityColor }]}>
           {task.priority.toUpperCase()}
@@ -331,14 +369,25 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete: () => void }) 
         )}
 
         {task.due_at && (
-          <Text style={styles.due}>Due {task.due_at.slice(0, 10)}</Text>
+          <Text style={styles.due}>Due {fmtDate(task.due_at)}</Text>
         )}
 
-        {task.status !== 'done' && task.status !== 'archived' && (
-          <TouchableOpacity style={styles.doneBtn} onPress={onComplete}>
-            <Text style={styles.doneBtnText}>Done</Text>
-          </TouchableOpacity>
-        )}
+        <Text style={styles.timestamp}>
+          {expanded ? fmtDateTime(task.created_at) : fmtDate(task.created_at)}
+        </Text>
+
+        <View style={styles.cardActions}>
+          {isActive && (
+            <>
+              <TouchableOpacity style={styles.checkBtn} onPress={onComplete}>
+                <Text style={styles.checkBtnText}>✓</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.ignoreBtn} onPress={onIgnore}>
+                <Text style={styles.ignoreBtnText}>✕</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
     </View>
   )
@@ -490,12 +539,23 @@ const styles = StyleSheet.create({
   },
   cardTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
   cardDesc: { fontSize: 13, color: '#666', marginBottom: 8 },
+  cardTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  chevron: { fontSize: 10, color: '#C7C7CC', marginTop: 2 },
   cardBottom: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-    marginTop: 4,
+    gap: 6,
+    marginTop: 8,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 6,
+    marginLeft: 'auto',
   },
   chip: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   chipText: { color: '#fff', fontSize: 11, fontWeight: '600' },
@@ -507,15 +567,26 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   agentBadgeText: { color: '#AF52DE', fontSize: 11, fontWeight: '600' },
-  due: { fontSize: 12, color: '#FF9500' },
-  doneBtn: {
-    marginLeft: 'auto',
+  due: { fontSize: 11, color: '#FF9500' },
+  timestamp: { fontSize: 11, color: '#8E8E93' },
+  checkBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#34C759',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  doneBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  checkBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', lineHeight: 20 },
+  ignoreBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#C7C7CC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ignoreBtnText: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18 },
   fab: {
     position: 'absolute',
     bottom: 24,
