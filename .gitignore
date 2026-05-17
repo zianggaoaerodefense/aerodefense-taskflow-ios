@@ -43,6 +43,7 @@ AuthKey_*.p8
 # Credentials — NEVER commit these
 .env
 *.env.*
+!*.env.example
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
