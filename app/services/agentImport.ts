@@ -106,6 +106,11 @@ function findForbiddenKey(obj: unknown): string | null {
 
 const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'critical'])
 
+function parseIsoDate(s: string): string | undefined {
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? undefined : d.toISOString()
+}
+
 export function parseAndValidate(text: string): AgentImportPayload {
   let raw: unknown
   try {
@@ -184,7 +189,7 @@ export function parseAndValidate(text: string): AgentImportPayload {
         description:
           typeof task.description === 'string' ? task.description.trim() || undefined : undefined,
         priority: task.priority as TaskPriority | undefined,
-        due_at: typeof task.due_at === 'string' ? task.due_at : undefined,
+        due_at: typeof task.due_at === 'string' ? parseIsoDate(task.due_at) : undefined,
         workflow_name:
           typeof task.workflow_name === 'string' ? task.workflow_name.trim() || undefined : undefined,
       }
