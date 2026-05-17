@@ -25,6 +25,10 @@ For the Expo app: Supabase Row-Level Security policies enforce `auth.uid() = use
 
 For Edge Functions: The service role key bypasses RLS, so each function performs an explicit ownership check in application code before applying any write. For example, `agent-update-task` fetches the task and asserts `task.user_id === resolvedUserId` before updating.
 
+### `user_id` must be explicitly supplied on INSERT
+
+The `tasks` and `task_events` tables have `user_id NOT NULL` with **no database DEFAULT**. RLS enforces that the value equals `auth.uid()` but does not supply it. Every INSERT from the app must explicitly pass `user_id: userId` (obtained from `supabase.auth.getSession()`). Omitting it causes a not-null constraint violation — Postgres will reject the insert before RLS even runs.
+
 ---
 
 ## Row-Level Security

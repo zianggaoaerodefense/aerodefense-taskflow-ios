@@ -86,6 +86,22 @@ For a physical device, use your staging Supabase project URL (not `127.0.0.1` �
 3. Note the **Project URL** and **anon key** from **Settings → API**.
 4. Never share or commit the **service role key**.
 
+## Supabase Dashboard Configuration
+
+### Required dashboard settings
+
+After creating the project, two settings must be configured in the Supabase dashboard before the app will work:
+
+**1. Expose the public schema to the API**
+
+Go to **Settings → API → Exposed schemas**. Ensure `public` is in the list. If it is missing, add it and save. Without this, every query from the Expo app returns a "no rows" error silently or an API-disabled error — the tables exist but the PostgREST layer cannot reach them.
+
+**2. Disable email confirmation (development only)**
+
+Go to **Authentication → Providers → Email** and toggle off **"Confirm email"**. This allows sign-up → sign-in immediately without clicking a confirmation link. Re-enable this before shipping to real users.
+
+If email confirmation is enabled and a user signs up without clicking the link, `signInWithPassword` returns an "Email not confirmed" error.
+
 ### Link the CLI to your project
 
 ```bash
@@ -209,12 +225,29 @@ npx eas-cli submit --platform android
 
 ### CI/CD with GitHub Actions
 
-Add the following secrets to your GitHub repository:
+Supabase schema migrations and Edge Functions are deployed automatically by `.github/workflows/deploy-supabase.yml` on every push to `main` and on pull request merge. This is the **primary deployment path** — do not run `supabase db push` or `supabase functions deploy` manually in production.
+
+Required GitHub repository secrets (Settings → Secrets → Actions):
+
+| Secret | Description |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | Personal access token from supabase.com/dashboard/account/tokens |
+| `SUPABASE_DB_PASSWORD` | Database password from Supabase project settings |
+
+Required GitHub repository variables (Settings → Variables → Actions):
+
+| Variable | Description |
+|---|---|
+| `SUPABASE_PROJECT_REF` | Project reference ID (e.g. `yeoptggqtxdulhhwfbgk`) |
+
+For the Expo app build secrets:
 - `EXPO_TOKEN` — from expo.dev account settings
 - `EXPO_PUBLIC_SUPABASE_URL` — staging or production URL
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY` — staging or production anon key
 
 Never commit these values. Use GitHub Actions secrets or EAS environment variables (`eas env:create`).
+
+> **Note:** `supabase db push` requires `SUPABASE_DB_PASSWORD` in its environment. Omitting it causes the command to stall waiting for interactive input — it will not fail with an obvious error.
 
 ---
 

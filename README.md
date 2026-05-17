@@ -108,6 +108,19 @@ supabase functions serve --import-map supabase/functions/import_map.json
 4. Start the dev server: `npx expo start`
 5. Press `i` for iOS Simulator, `a` for Android Emulator, or scan the QR code with Expo Go.
 
+### First-time Supabase project setup (hosted)
+
+Two dashboard settings are required before the app works against a hosted Supabase project:
+
+| Setting | Location | Required value |
+|---------|----------|----------------|
+| Exposed schemas | Settings → API → Exposed schemas | `public` must be in the list |
+| Email confirmation | Authentication → Providers → Email | Disable "Confirm email" for development |
+
+**Exposed schemas:** If `public` is missing from the list, every table query from the app fails silently — the tables exist but the PostgREST API cannot reach them.
+
+**Email confirmation:** With confirmation enabled, `signInWithPassword` returns "Email not confirmed" for any account that hasn't clicked the verification link. Disable it during development; re-enable before shipping to real users.
+
 ---
 
 ## Security Model

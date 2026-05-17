@@ -6,7 +6,7 @@ This document describes how to configure the TaskFlow Custom GPT to interact wit
 
 ## Overview
 
-The ChatGPT agent communicates with TaskFlow exclusively through Supabase Edge Functions. It has no direct database access. All requests are authenticated with an agent connection token that the user generates in the iOS app.
+The ChatGPT agent communicates with TaskFlow exclusively through Supabase Edge Functions. It has no direct database access. All requests are authenticated with an agent connection token that the user generates in the Expo app.
 
 **Data flow:**
 
@@ -17,7 +17,7 @@ Supabase Edge Function (HTTPS)
     ↓  service role (server-side only)
 Supabase Postgres (row scoped to token owner)
     ↓  Realtime / pull
-iOS app
+Expo app
 ```
 
 ---
@@ -30,7 +30,7 @@ Every agent request must include the `X-Agent-Token` header:
 X-Agent-Token: <raw-token-from-ios-app>
 ```
 
-The token is generated in the iOS app under **Settings → Connect ChatGPT Agent**. It maps to a specific user account. The Edge Function hashes the token with SHA-256 and looks it up in `agent_connections`. Only `active` tokens within their expiry are accepted.
+The token is generated in the Expo app under **Settings → Connect ChatGPT Agent**. It maps to a specific user account. The Edge Function hashes the token with SHA-256 and looks it up in `agent_connections`. Only `active` tokens within their expiry are accepted.
 
 **Never include a Supabase service role key or anon key in the GPT configuration.** Use only the `X-Agent-Token` mechanism.
 
@@ -458,7 +458,7 @@ paths:
 5. Under **Authentication**, select **API Key** and configure:
    - **Auth Type:** `Custom`
    - **Header name:** `X-Agent-Token`
-   - **API Key:** the raw token from the iOS app (**Settings → Connect ChatGPT Agent**)
+   - **API Key:** the raw token from the Expo app (**Settings → Connect ChatGPT Agent**)
 6. Save the action and test it.
 
 ---
@@ -487,10 +487,10 @@ Rules:
 
 | Event | What happens |
 |---|---|
-| User generates token in iOS app | Raw token returned once; hash stored in `agent_connections` |
+| User generates token in Expo app | Raw token returned once; hash stored in `agent_connections` |
 | GPT sends request with `X-Agent-Token` | Edge Function hashes the header value and looks it up |
 | Token matches active, non-expired row | Request proceeds; `last_used_at` updated |
-| User revokes in iOS app | `status` set to `revoked`; all subsequent requests return 401 |
+| User revokes in Expo app | `status` set to `revoked`; all subsequent requests return 401 |
 | Token expires (`expires_at` in past) | Requests return 401; user must create a new connection |
 
 ---
