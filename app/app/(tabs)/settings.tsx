@@ -30,6 +30,12 @@ export default function SettingsScreen() {
           onPress={() => router.push('/agent-connections')}
           chevron
         />
+        <Row
+          label="Import Agent Output"
+          subtitle="Paste JSON from a ChatGPT Skills response"
+          onPress={() => router.push('/agent-import')}
+          chevron
+        />
       </Section>
 
       <Section title="Account">
