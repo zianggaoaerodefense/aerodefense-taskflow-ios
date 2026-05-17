@@ -112,19 +112,29 @@ function parseIsoDate(s: string): string | undefined {
 }
 
 // ChatGPT web renders typographic/smart quotes instead of ASCII quotes.
-// JSON.parse rejects them, so normalize before parsing.
+// Normalization is applied only when the original text fails to parse, so
+// smart quotes that appear as literal characters inside valid JSON string
+// values are never corrupted.
 function normalizeQuotes(text: string): string {
   return text
-    .replace(/[“”]/g, '"')  // " " → "
-    .replace(/[‘’]/g, "'")  // ' ' → '
+    .replace(/[“”]/g, ‘”’)  // “ “ → “
+    .replace(/[‘’]/g, “’”)  // ‘ ‘ → ‘
+}
+
+const PARSE_FAILED = Symbol()
+
+function tryParse(s: string): unknown {
+  try { return JSON.parse(s) } catch { return PARSE_FAILED }
 }
 
 export function parseAndValidate(text: string): AgentImportPayload {
-  let raw: unknown
-  try {
-    raw = JSON.parse(normalizeQuotes(text.trim()))
-  } catch {
-    throw new Error('Invalid JSON — paste the raw output from the agent.')
+  const trimmed = text.trim()
+  // Try the original text first. Only normalize on failure so that string
+  // values containing typographic quotes are not corrupted.
+  let raw = tryParse(trimmed)
+  if (raw === PARSE_FAILED) raw = tryParse(normalizeQuotes(trimmed))
+  if (raw === PARSE_FAILED) {
+    throw new Error(‘Invalid JSON — paste the raw output from the agent.’)
   }
 
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
