@@ -1,6 +1,6 @@
 import 'react-native-url-polyfill/auto'
 import { useEffect, useState } from 'react'
-import { Slot, useRouter, useSegments } from 'expo-router'
+import { Stack, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
@@ -40,7 +40,16 @@ export default function RootLayout() {
 
   return (
     <>
-      <Slot />
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: '#fff' },
+          headerShadowVisible: false,
+          headerTintColor: '#007AFF',
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      </Stack>
       <StatusBar style="auto" />
     </>
   )
