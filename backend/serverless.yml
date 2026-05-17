@@ -27,7 +27,7 @@ provider:
   httpApi:
     cors:
       allowedOrigins:
-        - ${env:ALLOWED_ORIGINS, 'https://taskflow.internal'}
+        - ${env:ALLOWED_ORIGINS, 'https://your-app-domain.example.com'}
       allowedHeaders:
         - Authorization
         - Content-Type

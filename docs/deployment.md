@@ -238,7 +238,7 @@ Required GitHub repository variables (Settings → Variables → Actions):
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_PROJECT_REF` | Project reference ID (e.g. `yeoptggqtxdulhhwfbgk`) |
+| `SUPABASE_PROJECT_REF` | Project reference ID (e.g. `your-project-ref`) |
 
 For the Expo app build secrets:
 - `EXPO_TOKEN` — from expo.dev account settings
