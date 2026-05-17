@@ -111,10 +111,18 @@ function parseIsoDate(s: string): string | undefined {
   return isNaN(d.getTime()) ? undefined : d.toISOString()
 }
 
+// ChatGPT web renders typographic/smart quotes instead of ASCII quotes.
+// JSON.parse rejects them, so normalize before parsing.
+function normalizeQuotes(text: string): string {
+  return text
+    .replace(/[“”]/g, '"')  // " " → "
+    .replace(/[‘’]/g, "'")  // ' ' → '
+}
+
 export function parseAndValidate(text: string): AgentImportPayload {
   let raw: unknown
   try {
-    raw = JSON.parse(text.trim())
+    raw = JSON.parse(normalizeQuotes(text.trim()))
   } catch {
     throw new Error('Invalid JSON — paste the raw output from the agent.')
   }
