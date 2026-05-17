@@ -41,8 +41,8 @@ export default function AgentConnectionsScreen() {
     if (!silent) setRefreshing(true)
     try {
       setConnections(await listConnections())
-    } catch {
-      Alert.alert('Error', 'Could not load connections.')
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not load connections.')
     } finally {
       setLoading(false)
       setRefreshing(false)

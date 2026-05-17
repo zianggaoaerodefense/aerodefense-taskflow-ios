@@ -29,7 +29,7 @@ export default function SignInScreen() {
     })
     setLoading(false)
     if (error) {
-      Alert.alert('Sign-in failed', 'Check your credentials and try again.')
+      Alert.alert('Sign-in failed', error.message)
     }
     // On success the root layout auth observer will redirect to (tabs)
   }
