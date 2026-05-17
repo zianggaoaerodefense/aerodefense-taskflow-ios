@@ -23,13 +23,12 @@ export async function authenticateAppUser(
   const jwt = authHeader.slice(7);
   const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
   });
 
   const {
     data: { user },
     error,
-  } = await client.auth.getUser();
+  } = await client.auth.getUser(jwt);
   if (error || !user) return null;
 
   return { userId: user.id };
