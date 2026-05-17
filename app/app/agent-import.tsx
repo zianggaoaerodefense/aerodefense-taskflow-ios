@@ -205,11 +205,13 @@ export default function AgentImportScreen() {
           )}
 
           <Text style={styles.hint}>
-            The agent JSON must contain at least one of:{' '}
+            Must contain at least one of:{' '}
             <Text style={styles.mono}>summary</Text>, <Text style={styles.mono}>tasks</Text>,{' '}
-            <Text style={styles.mono}>workflows</Text>, or{' '}
-            <Text style={styles.mono}>agent_message</Text>.{'\n'}
-            JSON containing credential fields (user_id, api_key, token, etc.) will be rejected.
+            <Text style={styles.mono}>workflows</Text>, <Text style={styles.mono}>agent_message</Text>.{'\n'}
+            Summary text: <Text style={styles.mono}>content</Text> or <Text style={styles.mono}>body</Text>.{' '}
+            Workflow text: <Text style={styles.mono}>description</Text> or <Text style={styles.mono}>objective</Text>.{'\n'}
+            Extra fields (mode, version, source_ref, etc.) are ignored.{'\n'}
+            Credential fields (user_id, api_key, token, etc.) are rejected.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
