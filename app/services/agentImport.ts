@@ -117,8 +117,8 @@ function parseIsoDate(s: string): string | undefined {
 // values are never corrupted.
 function normalizeQuotes(text: string): string {
   return text
-    .replace(/[“”]/g, ‘”’)  // “ “ → “
-    .replace(/[‘’]/g, “’”)  // ‘ ‘ → ‘
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
 }
 
 const PARSE_FAILED = Symbol()
@@ -134,7 +134,7 @@ export function parseAndValidate(text: string): AgentImportPayload {
   let raw = tryParse(trimmed)
   if (raw === PARSE_FAILED) raw = tryParse(normalizeQuotes(trimmed))
   if (raw === PARSE_FAILED) {
-    throw new Error(‘Invalid JSON — paste the raw output from the agent.’)
+    throw new Error('Invalid JSON — paste the raw output from the agent.')
   }
 
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
