@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  Animated,
   FlatList,
   Modal,
+  PanResponder,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -12,7 +14,12 @@ import {
   View,
 } from 'react-native'
 import { supabase } from '../../lib/supabase'
-import { completeTask, createTask, fetchTasks } from '../../services/tasks'
+import {
+  completeTask,
+  createTask,
+  fetchTasks,
+  updateTaskStatus,
+} from '../../services/tasks'
 import type { Task, TaskPriority, TaskStatus } from '../../types/database'
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -43,6 +50,9 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
   high: 'High',
   critical: 'Critical',
 }
+
+// Width of each action button revealed by a left swipe.
+const ACTION_BTN_W = 90
 
 export default function TasksScreen() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -81,15 +91,41 @@ export default function TasksScreen() {
   async function handleComplete(task: Task) {
     try {
       await completeTask(task)
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, status: 'done' } : t)),
+      setTasks((prev: Task[]) =>
+        prev.map((t: Task) => (t.id === task.id ? { ...t, status: 'done' as TaskStatus } : t)),
       )
     } catch {
       Alert.alert('Error', 'Could not complete task.')
     }
   }
 
-  async function handleCreate(input: { title: string; description?: string; priority: TaskPriority }) {
+  async function handleArchive(task: Task) {
+    try {
+      await updateTaskStatus(task, 'archived')
+      setTasks((prev: Task[]) => prev.filter((t: Task) => t.id !== task.id))
+    } catch {
+      Alert.alert('Error', 'Could not archive task.')
+    }
+  }
+
+  async function handleReopen(task: Task) {
+    try {
+      await updateTaskStatus(task, 'open')
+      setTasks((prev: Task[]) =>
+        prev.map((t: Task) =>
+          t.id === task.id ? { ...t, status: 'open' as TaskStatus, updated_at: new Date().toISOString() } : t,
+        ),
+      )
+    } catch {
+      Alert.alert('Error', 'Could not reopen task.')
+    }
+  }
+
+  async function handleCreate(input: {
+    title: string
+    description?: string
+    priority: TaskPriority
+  }) {
     try {
       await createTask(input)
       await load(true)
@@ -116,13 +152,24 @@ export default function TasksScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => load()} />
         }
         ListEmptyComponent={
-          <Text style={styles.muted}>No open tasks. Tap + to create one or the ChatGPT agent will add them here.</Text>
+          <Text style={styles.muted}>
+            No open tasks. Tap + to create one or the ChatGPT agent will add them here.
+          </Text>
         }
         renderItem={({ item }) => (
-          <TaskCard task={item} onComplete={() => handleComplete(item)} />
+          <SwipeableTaskCard
+            task={item}
+            onComplete={() => handleComplete(item)}
+            onArchive={() => handleArchive(item)}
+            onReopen={() => handleReopen(item)}
+          />
         )}
       />
-      <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)} activeOpacity={0.85}>
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setModalVisible(true)}
+        activeOpacity={0.85}
+      >
         <Text style={styles.fabIcon}>+</Text>
       </TouchableOpacity>
       <CreateTaskModal
@@ -137,6 +184,170 @@ export default function TasksScreen() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Swipeable wrapper — left swipe reveals Archive (and Re-open for done tasks)
+// Uses Animated + PanResponder only (no external gesture library required).
+// ---------------------------------------------------------------------------
+
+function SwipeableTaskCard({
+  task,
+  onComplete,
+  onArchive,
+  onReopen,
+}: {
+  task: Task
+  onComplete: () => void
+  onArchive: () => void
+  onReopen: () => void
+}) {
+  const isDone = task.status === 'done'
+  const snapWidth = isDone ? ACTION_BTN_W * 2 : ACTION_BTN_W
+
+  // Refs so pan handler closures always see up-to-date values.
+  const snapRef = useRef(snapWidth)
+  const onArchiveRef = useRef(onArchive)
+  const onReopenRef = useRef(onReopen)
+  snapRef.current = snapWidth
+  onArchiveRef.current = onArchive
+  onReopenRef.current = onReopen
+
+  const translateX = useRef(new Animated.Value(0)).current
+  // Track the flattened position so we can read it without accessing _value.
+  const positionRef = useRef(0)
+
+  useEffect(() => {
+    const id = translateX.addListener(({ value }) => { positionRef.current = value })
+    return () => translateX.removeListener(id)
+  }, [translateX])
+
+  function snapOpen() {
+    Animated.spring(translateX, {
+      toValue: -snapRef.current,
+      useNativeDriver: true,
+      bounciness: 2,
+    }).start()
+  }
+
+  function snapClose() {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 2,
+    }).start()
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      // Only claim horizontal gestures that are clearly more horizontal than vertical.
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onPanResponderGrant: () => {
+        translateX.setOffset(positionRef.current)
+        translateX.setValue(0)
+      },
+      onPanResponderMove: (_, g) => {
+        // Allow dragging left up to snapWidth + a little over-drag; right up to 16.
+        translateX.setValue(
+          Math.max(Math.min(g.dx, 16), -(snapRef.current + 12)),
+        )
+      },
+      onPanResponderRelease: (_, g) => {
+        translateX.flattenOffset()
+        const pos = positionRef.current
+        if (g.dx < -40 || (g.vx < -0.5 && pos < -16)) {
+          snapOpen()
+        } else {
+          snapClose()
+        }
+      },
+      onPanResponderTerminate: () => {
+        translateX.flattenOffset()
+        snapClose()
+      },
+    }),
+  ).current
+
+  return (
+    <View style={swipe.container}>
+      {/* Action buttons sit behind the card and are revealed as it slides left. */}
+      <View style={[swipe.actions, { width: snapWidth }]}>
+        {isDone && (
+          <TouchableOpacity
+            style={[swipe.btn, { backgroundColor: '#007AFF' }]}
+            onPress={() => { snapClose(); onReopenRef.current() }}
+          >
+            <Text style={swipe.btnText}>Re-open</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[swipe.btn, { backgroundColor: '#FF3B30' }]}
+          onPress={() => { snapClose(); onArchiveRef.current() }}
+        >
+          <Text style={swipe.btnText}>Archive</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
+        <TaskCard task={task} onComplete={() => { snapClose(); onComplete() }} />
+      </Animated.View>
+    </View>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Task card (display only — no gesture logic)
+// ---------------------------------------------------------------------------
+
+function TaskCard({ task, onComplete }: { task: Task; onComplete: () => void }) {
+  const statusColor = STATUS_COLOR[task.status] ?? '#8E8E93'
+  const priorityColor = PRIORITY_COLOR[task.priority] ?? '#8E8E93'
+
+  return (
+    <View style={[styles.card, { borderLeftColor: statusColor }]}>
+      <View style={styles.cardTop}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {task.title}
+        </Text>
+        <View style={[styles.chip, { backgroundColor: statusColor }]}>
+          <Text style={styles.chipText}>{STATUS_LABEL[task.status]}</Text>
+        </View>
+      </View>
+
+      {task.description ? (
+        <Text style={styles.cardDesc} numberOfLines={2}>
+          {task.description}
+        </Text>
+      ) : null}
+
+      <View style={styles.cardBottom}>
+        <Text style={[styles.priority, { color: priorityColor }]}>
+          {task.priority.toUpperCase()}
+        </Text>
+
+        {task.source === 'agent' && (
+          <View style={styles.agentBadge}>
+            <Text style={styles.agentBadgeText}>Agent</Text>
+          </View>
+        )}
+
+        {task.due_at && (
+          <Text style={styles.due}>Due {task.due_at.slice(0, 10)}</Text>
+        )}
+
+        {task.status !== 'done' && task.status !== 'archived' && (
+          <TouchableOpacity style={styles.doneBtn} onPress={onComplete}>
+            <Text style={styles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Create task modal
+// ---------------------------------------------------------------------------
+
 function CreateTaskModal({
   visible,
   onClose,
@@ -144,7 +355,11 @@ function CreateTaskModal({
 }: {
   visible: boolean
   onClose: () => void
-  onCreate: (input: { title: string; description?: string; priority: TaskPriority }) => Promise<void>
+  onCreate: (input: {
+    title: string
+    description?: string
+    priority: TaskPriority
+  }) => Promise<void>
 }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -223,7 +438,10 @@ function CreateTaskModal({
                 key={p}
                 style={[
                   modal.priorityChip,
-                  priority === p && { backgroundColor: PRIORITY_COLOR[p], borderColor: PRIORITY_COLOR[p] },
+                  priority === p && {
+                    backgroundColor: PRIORITY_COLOR[p],
+                    borderColor: PRIORITY_COLOR[p],
+                  },
                 ]}
                 onPress={() => setPriority(p)}
               >
@@ -244,57 +462,15 @@ function CreateTaskModal({
   )
 }
 
-function TaskCard({ task, onComplete }: { task: Task; onComplete: () => void }) {
-  const statusColor = STATUS_COLOR[task.status] ?? '#8E8E93'
-  const priorityColor = PRIORITY_COLOR[task.priority] ?? '#8E8E93'
-
-  return (
-    <View style={[styles.card, { borderLeftColor: statusColor }]}>
-      <View style={styles.cardTop}>
-        <Text style={styles.cardTitle} numberOfLines={2}>
-          {task.title}
-        </Text>
-        <View style={[styles.chip, { backgroundColor: statusColor }]}>
-          <Text style={styles.chipText}>{STATUS_LABEL[task.status]}</Text>
-        </View>
-      </View>
-
-      {task.description ? (
-        <Text style={styles.cardDesc} numberOfLines={2}>
-          {task.description}
-        </Text>
-      ) : null}
-
-      <View style={styles.cardBottom}>
-        <Text style={[styles.priority, { color: priorityColor }]}>
-          {task.priority.toUpperCase()}
-        </Text>
-
-        {task.source === 'agent' && (
-          <View style={styles.agentBadge}>
-            <Text style={styles.agentBadgeText}>Agent</Text>
-          </View>
-        )}
-
-        {task.due_at && (
-          <Text style={styles.due}>Due {task.due_at.slice(0, 10)}</Text>
-        )}
-
-        {task.status !== 'done' && task.status !== 'archived' && (
-          <TouchableOpacity style={styles.doneBtn} onPress={onComplete}>
-            <Text style={styles.doneBtnText}>Done</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  )
-}
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   muted: { color: '#8E8E93', fontSize: 15, textAlign: 'center' },
-  list: { padding: 16, gap: 10 },
+  list: { paddingVertical: 8 },
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -359,6 +535,28 @@ const styles = StyleSheet.create({
   fabIcon: { color: '#fff', fontSize: 28, lineHeight: 32, fontWeight: '400' },
 })
 
+const swipe = StyleSheet.create({
+  container: {
+    marginHorizontal: 16,
+    marginVertical: 5,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  actions: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+  },
+  btn: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  btnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+})
+
 const modal = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F2F2F7' },
   header: {
@@ -394,7 +592,13 @@ const modal = StyleSheet.create({
     color: '#1a1a1a',
     minHeight: 80,
   },
-  sectionLabel: { fontSize: 13, fontWeight: '600', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   priorityRow: { flexDirection: 'row', gap: 8 },
   priorityChip: {
     flex: 1,
