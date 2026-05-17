@@ -148,9 +148,10 @@ export function parseAndValidate(text: string): AgentImportPayload {
     if (typeof s.title !== 'string' || !s.title.trim()) {
       throw new Error('"summary.title" must be a non-empty string.')
     }
-    // Accept "content" (canonical) or "body" (agent shorthand).
-    const summaryContent = typeof s.content === 'string' ? s.content : typeof s.body === 'string' ? s.body : null
-    if (!summaryContent?.trim()) {
+    // Accept "content" (canonical) or "body" (agent shorthand); prefer first non-blank value.
+    const summaryContent =
+      [s.content, s.body].find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? null
+    if (!summaryContent) {
       throw new Error('"summary" must have a non-empty "content" or "body" field.')
     }
     payload.summary = { title: s.title.trim(), content: summaryContent.trim() }
@@ -166,8 +167,9 @@ export function parseAndValidate(text: string): AgentImportPayload {
       if (typeof wf.name !== 'string' || !wf.name.trim()) {
         throw new Error(`workflows[${i}].name must be a non-empty string.`)
       }
-      // Accept "description" (canonical) or "objective" (agent shorthand).
-      const desc = typeof wf.description === 'string' ? wf.description : typeof wf.objective === 'string' ? wf.objective : undefined
+      // Accept "description" (canonical) or "objective" (agent shorthand); prefer first non-blank value.
+      const desc =
+        [wf.description, wf.objective].find((v): v is string => typeof v === 'string' && v.trim().length > 0)
       return {
         name: wf.name.trim(),
         description: desc?.trim() || undefined,
