@@ -240,3 +240,9 @@ See `docs/security.md` for full details.
 - MongoDB credentials
 - JWT secrets
 - Exported task data JSON files (`taskflow-export*.json`)
+
+---
+
+## License
+
+TaskFlow is licensed under the Business Source License 1.1 (`BUSL-1.1`). See [LICENSE](LICENSE) for the full license text and project-specific license parameters.
