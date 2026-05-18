@@ -1,8 +1,8 @@
 /**
  * Seed script — inserts safe sample data into Supabase for development.
  *
- * Usage:
- *   npx ts-node scripts/seed-sample-data.ts
+ * Usage (run from the app/ directory so ts-node resolves @supabase/supabase-js):
+ *   cd app && npx ts-node ../scripts/seed-sample-data.ts
  *
  * Requirements:
  *   - .env file in the repo root with SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY

@@ -269,7 +269,7 @@ Insert safe sample data for development and testing:
 supabase db seed --file supabase/seed.sql
 
 # Or run the TypeScript seed script (requires .env with service role key)
-npx ts-node scripts/seed-sample-data.ts
+cd app && npx ts-node ../scripts/seed-sample-data.ts
 ```
 
 The seed data contains only generic fictional examples. No real company data, emails, or customer information.

@@ -119,7 +119,7 @@ Run the seed script to insert example tasks and a summary, so you have something
 
 ```bash
 # From the repo root — requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env
-npx ts-node scripts/seed-sample-data.ts
+cd app && npx ts-node ../scripts/seed-sample-data.ts
 ```
 
 Or copy one of the JSON payloads from `agent/examples/` and paste it into the **Import** screen in the app.
