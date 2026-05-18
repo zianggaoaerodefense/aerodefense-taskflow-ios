@@ -1,0 +1,76 @@
+# OpenAI Custom GPT — Skill Descriptor
+# Load this file when configuring a ChatGPT Custom GPT that uses the workflow-app-supabase skill.
+
+name: workflow-app-supabase
+
+display_name: Workflow App — Supabase Integration
+
+description: >
+  Connects the Task Management Agent to a Supabase-backed workflow app.
+  Creates and updates tasks, summaries, workflows, and agent messages using
+  direct Supabase Edge Function calls (when an HTTP tool is available) or
+  import-ready JSON (when no HTTP tool is available).
+
+version: "1.0"
+
+# --- Skill loading ---
+# Paste the contents of SKILL.md into the Custom GPT system prompt.
+# Also include agent/prompts/security_rules.md.
+# Optionally include agent/prompts/daily_summary.md and agent/prompts/task_extraction.md
+# for daily planning workflows.
+
+skill_files:
+  - path: skills/hermes/workflow-app-supabase/SKILL.md
+    required: true
+    notes: Main skill instructions. Always load this.
+  - path: agent/prompts/security_rules.md
+    required: true
+    notes: Security constraints. Always load this alongside the skill.
+  - path: agent/prompts/daily_summary.md
+    required: false
+    notes: Load for daily planning workflows.
+  - path: agent/prompts/task_extraction.md
+    required: false
+    notes: Load for task extraction and triage workflows.
+  - path: agent/prompts/workflow_update.md
+    required: false
+    notes: Load for end-of-day workflow update workflows.
+
+# --- GPT Actions configuration ---
+# When configuring GPT Actions for direct API mode, point the action schema
+# at your Supabase project's Edge Function base URL.
+# Replace YOUR_PROJECT_REF with your actual Supabase project reference.
+
+gpt_actions:
+  base_url: "https://YOUR_PROJECT_REF.supabase.co/functions/v1"
+  auth_type: custom_header
+  auth_header: X-Agent-Token
+  auth_token_placeholder: "<agent_connection_token>"
+  endpoints:
+    - path: /agent-context
+      method: GET
+      description: Read current app context (open tasks, recent summaries, active workflows).
+    - path: /agent-write
+      method: POST
+      description: Create summaries, tasks, agent messages, and workflow runs.
+    - path: /agent-update-task
+      method: POST
+      description: Update an existing task status, priority, or description.
+
+# --- Default prompt ---
+# Suggested starter message for users of this Custom GPT.
+
+default_prompt: >
+  Good morning. Run the daily planning workflow:
+  1. Read my current app context.
+  2. Review email, project tracker, and calendar for today.
+  3. Create a daily summary and 3–7 focused tasks.
+  4. Use direct API mode if available, otherwise return import-ready JSON.
+
+# --- Security notes ---
+# The agent_connection_token must be provided securely by the Custom GPT's
+# action authentication settings. It must never be hardcoded in this file,
+# in the system prompt, or in any output the GPT produces.
+#
+# The token is generated in the workflow app under Settings → Connect Agent.
+# It is shown once and hashed before storage. Treat it like a password.
