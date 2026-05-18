@@ -125,4 +125,4 @@ Provide:
 
 ## License
 
-By contributing to this repository, you agree that your contributions will be licensed under the same [MIT License](../LICENSE) as the project.
+By contributing to this repository, you agree that your contributions will be licensed under the same [Business Source License 1.1](../LICENSE) as the project.

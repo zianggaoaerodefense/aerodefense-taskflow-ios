@@ -1,6 +1,7 @@
 {
   "name": "@taskflow/shared",
   "version": "0.1.0",
+  "license": "BUSL-1.1",
   "private": true,
   "description": "Shared TypeScript types for TaskFlow Edge Functions and tooling",
   "main": "dist/index.js",

@@ -403,4 +403,4 @@ See `docs/SECURITY.md` for the full security guide.
 
 ## License
 
-[MIT](LICENSE)
+[Business Source License 1.1](LICENSE)

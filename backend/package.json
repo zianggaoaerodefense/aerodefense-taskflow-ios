@@ -1,6 +1,7 @@
 {
   "name": "taskflow-backend",
   "version": "1.0.0",
+  "license": "BUSL-1.1",
   "description": "TaskFlow backend - AWS Lambda + MongoDB",
   "scripts": {
     "build": "tsc",

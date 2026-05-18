@@ -73,9 +73,9 @@ Work through this checklist before publishing the repository publicly. Check eac
 ## Legal
 
 - [x] LICENSE file is present and correct
-- [x] License is appropriate for the intended open-source release (MIT or other)
+- [x] License is appropriate for the intended source-available release (BUSL-1.1 or other)
 - [x] No third-party code is included without proper attribution
-- [x] No proprietary code or proprietary dependencies are included
+- [x] No third-party proprietary code or proprietary dependencies are included without proper authorization
 
 ---
 
