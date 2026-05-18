@@ -1,6 +1,6 @@
 # Daily Workflow Management App
 
-An open-source daily workflow management system that connects an AI agent to a mobile task app via a shared database.
+A source-available daily workflow management system that connects an AI agent to a mobile task app via a shared database.
 
 The agent collects context from your work tools — email, calendar, Jira, Slack, GitHub, documents, and notes — then generates daily summaries, suggested tasks, blockers, follow-ups, and prioritized work items. Those items are stored in Supabase and shown in the mobile app. You review, accept, complete, comment on, or reject tasks. The next agent run reads your feedback and continues from there.
 
@@ -78,7 +78,7 @@ The mobile app and the AI agent **never connect to Postgres directly**. All agen
 
 ---
 
-## Open-Source Scope
+## Source-Available Scope
 
 This repository contains:
 
