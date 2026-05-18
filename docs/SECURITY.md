@@ -177,7 +177,7 @@ rg -in "service_role|api[_-]?key|api[_-]?secret|private[_-]?key|client[_-]?secre
 
 ```bash
 # Check for any company-specific naming that should not be public
-rg -in "CTO workflow|cto_workflow" .
+rg -in "\bCTO\b" .
 
 # Check for real email addresses
 rg -n "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.(com|org|net|io)" . \

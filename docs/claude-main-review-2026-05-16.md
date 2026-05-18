@@ -58,7 +58,7 @@ Claude made strong progress by creating the monorepo, iOS SwiftUI app, Lambda ha
 
 **Problem:** `/agent/run-results` loops over `summaryPayload.taskCandidates` and inserts each candidate as a real `TaskDoc`. The intended flow is that agent output creates summaries and task candidates, then the user reviews/accepts candidates before real task cards are created.
 
-**Why it matters:** The CTO loses the explicit review/accept step, which is core to the product and security model. Agent-suggested work can appear as actual tasks prematurely.
+**Why it matters:** The user loses the explicit review/accept step, which is core to the product and security model. Agent-suggested work can appear as actual tasks prematurely.
 
 **Claude prompt:**
 
@@ -110,7 +110,7 @@ Claude made strong progress by creating the monorepo, iOS SwiftUI app, Lambda ha
 
 **Severity:** High TestFlight/security issue
 
-**Problem:** `TokenStorage` persists bearer tokens in `UserDefaults`. `APIConfig.baseURL` defaults to `http://localhost:3000`. These are acceptable only for early local development, not for TestFlight with real CTO data.
+**Problem:** `TokenStorage` persists bearer tokens in `UserDefaults`. `APIConfig.baseURL` defaults to `http://localhost:3000`. These are acceptable only for early local development, not for TestFlight with real user data.
 
 **Why it matters:** Bearer tokens should be protected by Keychain. Production/TestFlight should require HTTPS and should not silently target localhost.
 

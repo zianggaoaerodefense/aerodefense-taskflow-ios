@@ -7,7 +7,7 @@ Work through this checklist before publishing the repository publicly. Check eac
 ## Naming and Branding
 
 - [x] Product name is "Daily Workflow Management App" (or "TaskFlow" as the technical codebase name)
-- [x] No "CTO workflow" wording remains in any file (code, docs, comments, configs, prompts)
+- [x] No "CTO" wording remains in any file (code, docs, comments, configs, prompts)
 - [x] No proprietary business names appear in user-facing content
 - [x] No internal codenames or project aliases remain in documentation
 

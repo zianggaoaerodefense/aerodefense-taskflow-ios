@@ -6,7 +6,7 @@
  *   It is always sourced from the verified AuthContext produced by withAuth().
  * - All MongoDB queries delegate to approvalRepo which filters by userId + orgId.
  * - Approval requests are NEVER auto-executed. Execution of any external
- *   action requires a separate explicit CTO action on /mark-executed.
+ *   action requires a separate explicit user action on /mark-executed.
  * - The `payload` field is stored opaquely; it must not contain credentials.
  * - External inputs are validated with Zod before use.
  */
@@ -207,7 +207,7 @@ export const reject = withAuth(
 // ---------------------------------------------------------------------------
 // POST /approval-requests/{id}/mark-executed
 //
-// Records that the CTO has manually executed the approved action externally.
+// Records that the user has manually executed the approved action externally.
 // This endpoint does NOT trigger any external side-effect itself.
 // ---------------------------------------------------------------------------
 
