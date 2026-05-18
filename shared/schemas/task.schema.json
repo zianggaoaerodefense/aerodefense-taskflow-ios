@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://taskflow.internal/schemas/task.schema.json",
+  "$id": "https://schemas.example.com/daily-workflow/task.schema.json",
   "title": "Task",
   "description": "A TaskFlow task item representing a discrete action or request managed by a user.",
   "type": "object",

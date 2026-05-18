@@ -1,28 +1,214 @@
-# TaskFlow — Private daily Workflow System
+# Daily Workflow Management App
 
-**Monorepo: Expo App + Supabase Backend + ChatGPT Agent**
+An open-source daily workflow management system that connects an AI agent to a mobile task app via a shared database.
 
-A private, secure task-management system that turns meeting notes, GPT summaries, email, Slack, and Jira inputs into structured task cards with a full review-and-action workflow.
+The agent collects context from your work tools — email, calendar, Jira, Slack, GitHub, documents, and notes — then generates daily summaries, suggested tasks, blockers, follow-ups, and prioritized work items. Those items are stored in Supabase and shown in the mobile app. You review, accept, complete, comment on, or reject tasks. The next agent run reads your feedback and continues from there.
 
 ---
 
 ## Architecture
 
 ```
-Expo React Native App (primary UI, expo-secure-store sessions)
-        ↕ HTTPS (Supabase anon key + user JWT, bound by RLS)
-Supabase Postgres (system of record, Row-Level Security)
-        ↕ Realtime
-Expo React Native App (auto-refresh on agent writes)
-
-ChatGPT Custom GPT (agent interface)
-        ↕ HTTPS (X-Agent-Token header)
-Supabase Edge Functions (Deno, service role key — server-side only)
-        ↕
-Supabase Postgres (queries scoped to resolved user_id)
+┌──────────────────────────────────────────────────────────────┐
+│  External Sources                                            │
+│  (Email · Calendar · Jira · Slack · GitHub · Notes)         │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ context input
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  AI Agent Runtime                                            │
+│  (ChatGPT · Claude · custom script · GitHub Actions · etc.) │
+│                                                              │
+│  Reads prior state → Summarises → Extracts tasks → Writes   │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ HTTPS (X-Agent-Token)
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Supabase Edge Functions  (server-side, service role only)   │
+│  agent-context · agent-write · agent-update-task            │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Supabase Postgres (Row-Level Security enforced)             │
+│  tasks · summaries · workflows · task_events · audit_logs   │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ HTTPS (anon key + JWT, bound by RLS)
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Expo React Native Mobile App                                │
+│  Task list · Summaries · Workflows · Settings               │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ Supabase Realtime (live updates)
+                           ▼
+                     User reviews tasks,
+                   marks complete, comments,
+                  rejects, defers, prioritises
 ```
 
-**The app and ChatGPT agent never connect to Postgres directly. All reads/writes go through the authenticated Supabase client (app) or Edge Functions (agent).**
+The mobile app and the AI agent **never connect to Postgres directly**. All agent reads/writes go through authenticated Supabase Edge Functions. All app reads/writes go through the Supabase client (anon key + authenticated JWT, restricted by RLS).
+
+---
+
+## High-Level Workflow
+
+1. A scheduled or manually triggered agent reviews available work context.
+2. The agent creates a daily summary.
+3. The agent extracts tasks, decisions, blockers, and follow-ups.
+4. The agent writes structured data into Supabase via Edge Functions.
+5. The mobile app reads the user's data from Supabase.
+6. The user reviews, edits, accepts, rejects, completes, or comments on tasks.
+7. Those user actions are saved back to Supabase.
+8. The next agent run reads the updated workflow state and continues from there.
+
+---
+
+## Major Components
+
+| Component | Description |
+|-----------|-------------|
+| **Expo / React Native app** | Mobile task UI. Built with Expo Router. Sessions stored in hardware-backed SecureStore. |
+| **Supabase Auth** | Email/password sign-up and sign-in. JWT sessions. |
+| **Supabase Postgres** | System of record. 10 tables, all with Row-Level Security. |
+| **Supabase RLS** | Every user-owned table enforces `auth.uid() = user_id`. Users can only access their own data. |
+| **Supabase Edge Functions** | Deno/TypeScript server-side functions. The only path for agent reads/writes. Service role key lives here only. |
+| **Agent runtime** | Pluggable — ChatGPT Custom GPT, Claude, Codex, custom script, GitHub Actions, AWS Lambda, or any HTTP-capable scheduler. |
+| **Agent prompts / skills** | Reusable instruction files that tell the agent how to summarise, extract tasks, and update workflow state. |
+| **Agent connection tokens** | Per-user tokens generated in the app. Only the SHA-256 hash is stored. Raw token shown once. |
+
+---
+
+## Open-Source Scope
+
+This repository contains:
+
+- The Expo React Native mobile app (`app/`)
+- The Supabase schema, RLS policies, and Edge Functions (`supabase/`)
+- Agent prompt templates and example payloads (`agent/`)
+- Full documentation (`docs/`)
+
+**You must bring your own:**
+
+- Supabase project (free tier works for development)
+- AI model account (OpenAI, Anthropic, or self-hosted)
+- Email/Jira/Slack/GitHub credentials (for integrations you want to enable)
+- Agent runtime and scheduler (ChatGPT Custom GPT, cron job, GitHub Actions, cloud function, etc.)
+- API keys for any external services
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 18 or later
+- [npm](https://npmjs.com/) or [yarn](https://yarnpkg.com/)
+- [Expo CLI](https://docs.expo.dev/more/expo-cli/): `npm install -g expo` (or use `npx expo`)
+- [Expo Go](https://expo.dev/go) app on your phone (for development)
+- [Supabase account](https://supabase.com) (free tier is fine)
+- [Supabase CLI](https://supabase.com/docs/guides/cli) (optional, for local development)
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/your-org/daily-workflow-app.git
+cd daily-workflow-app
+```
+
+### 2. Install dependencies
+
+```bash
+cd app
+npm install
+```
+
+### 3. Create a Supabase project
+
+1. Go to [supabase.com](https://supabase.com) and create a new project.
+2. Wait for the project to finish provisioning (1–2 minutes).
+3. In the Supabase dashboard, go to **Settings → API**.
+4. Copy your **Project URL** and **anon public** key.
+
+### 4. Configure environment variables
+
+```bash
+cp app/.env.example app/.env
+# Edit app/.env and fill in your Supabase URL and anon key
+```
+
+Also copy the root `.env.example` if you plan to run server-side scripts or the agent:
+
+```bash
+cp .env.example .env
+# Edit .env and fill in your Supabase service role key (server-side only)
+```
+
+### 5. Apply the database schema
+
+**Option A — Supabase CLI (recommended for local dev):**
+
+```bash
+# Install Supabase CLI (macOS)
+brew install supabase/tap/supabase
+
+# Start local Supabase stack (Postgres + Studio + Edge Functions)
+supabase start
+
+# Apply migrations
+supabase db reset
+
+# In a separate terminal, serve Edge Functions
+supabase functions serve --import-map supabase/functions/import_map.json
+```
+
+**Option B — Supabase dashboard (hosted project):**
+
+1. In the Supabase dashboard, go to **SQL Editor**.
+2. Copy the contents of `supabase/migrations/20240101000000_initial_schema.sql`.
+3. Paste and run it.
+
+### 6. Configure two required dashboard settings (hosted project only)
+
+| Setting | Location | Required value |
+|---------|----------|----------------|
+| Exposed schemas | Settings → API → Exposed schemas | `public` must be listed |
+| Email confirmation | Authentication → Providers → Email | Disable for development |
+
+> **Exposed schemas:** If `public` is missing, every table query from the app fails silently.
+> **Email confirmation:** With it enabled, `signInWithPassword` returns "Email not confirmed" until the verification link is clicked. Disable during development; re-enable before shipping to real users.
+
+### 7. Start the Expo app
+
+```bash
+cd app
+npx expo start
+```
+
+- Press `i` for iOS Simulator
+- Press `a` for Android Emulator
+- Scan the QR code with [Expo Go](https://expo.dev/go) on your phone
+
+### 8. Create a test user
+
+Open the app → tap **Sign up** → enter any email and password.
+
+### 9. Load sample data
+
+Run the seed script to insert example tasks and a summary:
+
+```bash
+# From the repo root (requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env)
+cd app && npx ts-node ../scripts/seed-sample-data.ts
+```
+
+Or copy one of the example agent payloads from `agent/examples/` and use the **Import** screen in the app.
+
+### 10. Connect an agent (optional)
+
+1. In the app, go to **Settings → Connect Agent → New Connection**.
+2. Copy the token shown once.
+3. Configure your agent runtime to send `X-Agent-Token: <your-token>` to the Edge Function endpoints.
+4. See `docs/SETUP_AGENT.md` for details.
 
 ---
 
@@ -30,96 +216,68 @@ Supabase Postgres (queries scoped to resolved user_id)
 
 ```
 /
-├── ios/                              # SwiftUI app (legacy reference)
-│   ├── TaskFlow.xcodeproj/
-│   └── TaskFlow/
-│       ├── Models/                   # SwiftData @Model classes
-│       ├── Services/                 # SupabaseClient, AuthService, SupabaseTaskService, etc.
-│       ├── ViewModels/               # @Observable / ObservableObject view models
-│       ├── Views/                    # SwiftUI views
-│       │   └── Settings/            # ConnectAgentView, SettingsView
-│       └── Resources/               # SampleData
+├── README.md
+├── LICENSE
+├── .env.example                    # Root-level env reference (server + agent vars)
+├── .gitignore
 │
-├── app/                              # Expo React Native app (MVP)
-│   ├── app/                         # Expo Router routes
-│   │   ├── (auth)/                  # Sign-in, sign-up
-│   │   ├── (tabs)/                  # Tasks, Summaries, Workflows, Settings
-│   │   └── agent-connections.tsx    # Agent connection management
-│   ├── lib/                         # supabase.ts (SecureStore adapter)
-│   ├── services/                    # tasks.ts, summaries.ts, workflows.ts, agentConnections.ts
-│   └── types/                       # database.ts
+├── app/                            # Expo React Native mobile app
+│   ├── app/                        # Expo Router routes
+│   │   ├── (auth)/                 # Sign-in, sign-up screens
+│   │   ├── (tabs)/                 # Tasks, Summaries, Workflows, Settings
+│   │   └── agent-connections.tsx   # Agent connection management
+│   ├── lib/supabase.ts             # Supabase client (SecureStore sessions)
+│   ├── services/                   # tasks, summaries, workflows, agentConnections
+│   ├── types/database.ts           # TypeScript types mirroring the schema
+│   └── .env.example                # Client-side env vars (EXPO_PUBLIC_* only)
 │
-├── supabase/                         # Supabase project
-│   ├── config.toml                  # Local dev configuration
-│   ├── migrations/                   # SQL migrations (schema, RLS, indexes)
-│   └── functions/                   # Edge Functions (Deno/TypeScript)
-│       ├── _shared/                 # cors.ts, auth.ts (shared utilities)
-│       ├── agent-context/           # GET — return workflow context to ChatGPT
-│       ├── agent-write/             # POST — create summaries/tasks/messages
-│       ├── agent-update-task/       # POST — update task + insert event
-│       ├── create-agent-connection/ # POST — generate agent token (app user only)
-│       └── revoke-agent-connection/ # POST — revoke agent token (app user only)
+├── supabase/                       # Supabase project
+│   ├── config.toml                 # Local dev config
+│   ├── migrations/                 # SQL schema, RLS, indexes, triggers
+│   ├── seed.sql                    # Safe sample data for development
+│   └── functions/                  # Deno Edge Functions
+│       ├── _shared/                # auth.ts, cors.ts (shared utilities)
+│       ├── agent-context/          # GET — return workflow context to agent
+│       ├── agent-write/            # POST — create summaries/tasks/messages
+│       ├── agent-update-task/      # POST — update task + log event
+│       ├── create-agent-connection/ # POST — generate agent token
+│       └── revoke-agent-connection/ # POST — revoke agent token
 │
-├── packages/
-│   └── shared/                      # TypeScript types (shared across tooling)
-│       └── src/types.ts
+├── agent/                          # Agent configuration and examples
+│   ├── prompts/                    # Reusable prompt/instruction files
+│   │   ├── daily_summary.md
+│   │   ├── task_extraction.md
+│   │   ├── workflow_update.md
+│   │   └── security_rules.md
+│   ├── skills/README.md            # Workflow skills documentation
+│   └── examples/                   # Sample agent payloads
+│       ├── sample_daily_summary.json
+│       └── sample_tasks.json
 │
-├── backend/                          # AWS Lambda implementation (future option)
-│   └── src/                         # Preserved as reference; not the active path
+├── scripts/                        # Development and maintenance scripts
+│   ├── seed-sample-data.ts         # Insert safe sample data
+│   ├── sanity-check.sh             # Verify setup is correct
+│   └── security-scan.sh            # Scan for accidental secret leaks
 │
-├── shared/
-│   └── schemas/                      # JSON Schema definitions
+├── packages/shared/                # Shared TypeScript types
+│   └── src/types.ts
 │
-├── docs/
-│   ├── architecture.md
-│   ├── deployment.md
-│   ├── security.md
-│   ├── chatgpt-agent-actions.md    # GPT Action OpenAPI schema + setup guide
-│   └── api.md
+├── docs/                           # Full documentation
+│   ├── ARCHITECTURE.md
+│   ├── SETUP_APP.md
+│   ├── SETUP_DATABASE.md
+│   ├── SETUP_AGENT.md
+│   ├── WORKFLOW.md
+│   ├── SECURITY.md
+│   ├── ENVIRONMENT_VARIABLES.md
+│   ├── TROUBLESHOOTING.md
+│   ├── ROADMAP.md
+│   ├── CONTRIBUTING.md
+│   └── OPEN_SOURCE_RELEASE_CHECKLIST.md
 │
-└── README.md
+├── ios/                            # Legacy SwiftUI prototype (reference only)
+└── backend/                        # Legacy AWS Lambda reference (not active)
 ```
-
----
-
-## Quick Start
-
-### Supabase (local dev)
-
-```bash
-# Install Supabase CLI (macOS)
-brew install supabase/tap/supabase
-
-# Start local Postgres + Studio + Edge Function runtime
-supabase start
-
-# Apply schema migrations
-supabase db reset
-
-# Serve Edge Functions locally
-supabase functions serve --import-map supabase/functions/import_map.json
-```
-
-### Expo App
-
-1. Copy the env file: `cp app/.env.example app/.env`
-2. Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from **Supabase → Settings → API**.
-3. Install dependencies: `cd app && npm install`
-4. Start the dev server: `npx expo start`
-5. Press `i` for iOS Simulator, `a` for Android Emulator, or scan the QR code with Expo Go.
-
-### First-time Supabase project setup (hosted)
-
-Two dashboard settings are required before the app works against a hosted Supabase project:
-
-| Setting | Location | Required value |
-|---------|----------|----------------|
-| Exposed schemas | Settings → API → Exposed schemas | `public` must be in the list |
-| Email confirmation | Authentication → Providers → Email | Disable "Confirm email" for development |
-
-**Exposed schemas:** If `public` is missing from the list, every table query from the app fails silently — the tables exist but the PostgREST API cannot reach them.
-
-**Email confirmation:** With confirmation enabled, `signInWithPassword` returns "Email not confirmed" for any account that hasn't clicked the verification link. Disable it during development; re-enable before shipping to real users.
 
 ---
 
@@ -127,113 +285,56 @@ Two dashboard settings are required before the app works against a hosted Supaba
 
 | Rule | Implementation |
 |------|---------------|
-| `user_id` never trusted from client | App: derived from RLS (`auth.uid()`). Agent: resolved from token hash lookup, never from body |
-| All DB queries scoped by `user_id` | RLS policies on every table enforce `auth.uid() = user_id` |
-| Postgres only via authenticated paths | App uses anon key + JWT; agent uses Edge Functions with service role |
-| Service role key never in the app | Only available inside Edge Functions as a runtime environment variable |
-| Agent tokens hashed before storage | SHA-256 hash stored; raw token returned once and never persisted |
-| RLS enabled on all user-owned tables | Enabled on all 10 tables; no DELETE policies |
-| Every task mutation emits task_events | App and agent both insert a `task_events` row on every change |
-| Audit log for agent writes and updates | `audit_logs` table; append-only; no raw content in snapshots |
-| Expo sessions in SecureStore | expo-secure-store stores the Supabase JWT in hardware-backed Keychain (iOS) with chunking for large tokens |
-| No secrets committed | `.gitignore` blocks `.env`, `*.p12`, `AuthKey_*.p8` |
+| `user_id` never trusted from client | App: derived from RLS (`auth.uid()`). Agent: resolved from token hash lookup, never from body. |
+| All DB queries scoped by `user_id` | RLS policies on every table enforce `auth.uid() = user_id`. |
+| Postgres accessible only via authenticated paths | App uses anon key + JWT (RLS-bound). Agent uses Edge Functions with service role. |
+| Service role key never in the mobile app | Only available inside Edge Functions as a runtime environment variable. |
+| Agent tokens hashed before storage | SHA-256 hash stored; raw token returned once and never persisted. |
+| RLS enabled on all user-owned tables | Enabled on all 10 tables; no DELETE policies (rows are archived instead). |
+| Every task mutation emits a task_events row | App and agent both insert a `task_events` row on every change. |
+| Append-only audit log | `audit_logs` table records all agent writes and task updates. |
+| Sessions in hardware-backed storage | expo-secure-store uses iOS Keychain / Android Keystore with chunking for large JWT payloads. |
+| No secrets committed | `.gitignore` excludes `.env`, signing artifacts, and exported data files. |
 
 ---
 
-## Data Flow
+## Limitations
 
-### ChatGPT agent reads context
-1. GPT calls `GET /functions/v1/agent-context` with `X-Agent-Token` header.
-2. Edge Function hashes the token, looks it up in `agent_connections`, resolves `user_id`.
-3. Returns open tasks, recent events, summaries, workflows, and agent messages for that user.
-
-### ChatGPT agent creates a task
-1. GPT calls `POST /functions/v1/agent-write` with task details.
-2. Edge Function resolves `user_id` from token (not from request body).
-3. Inserts task with `source='agent'` and `user_id` from lookup.
-4. Inserts `task_events` row: `actor='agent'`, `event_type='created'`.
-5. Expo Realtime subscription fires → app refreshes.
-
-### User changes a task in the app
-1. User taps "Complete" → `completeTask() from the tasks service`.
-2. Updates `tasks.status = 'done'` (RLS enforces scope).
-3. Inserts `task_events` row: `actor='user'`, `event_type='status_changed'`.
-4. Next GPT context call sees the task in `recently_completed_tasks`.
-
-### User connects the ChatGPT agent
-1. **Settings → Connect ChatGPT Agent → New Connection**.
-2. App calls `create-agent-connection` with the user's Supabase session JWT.
-3. Edge Function generates a random 32-byte token, stores its SHA-256 hash.
-4. Raw token shown once — user copies it into Custom GPT action `X-Agent-Token` header.
+- **The agent can hallucinate or create low-quality tasks.** Always review generated tasks before acting on them.
+- **The app does not run the agent.** The agent is a separate runtime. The mobile app only reads/writes data; it does not execute the agent logic.
+- **Expo Go is for development.** For production distribution use EAS Build, TestFlight, or the app store.
+- **Persistent automation needs an external scheduler.** Cron jobs, GitHub Actions, cloud functions, or hosted agent runtimes are required. If your local computer stops, the local Expo dev server stops too.
+- **Integrations need user-managed credentials.** Gmail, Jira, Slack, and GitHub each require you to configure your own API keys.
+- **Security depends on correct RLS and secret handling.** Review `docs/SECURITY.md` before any production deployment.
+- **This is an MVP/foundation, not a fully managed SaaS product.**
 
 ---
 
-## Supabase Tables
+## Security Warning
 
-| Table | Purpose |
-|-----------|---------|
-| `profiles` | User display name and role |
-| `workflows` | Named workflow definitions |
-| `workflow_runs` | Individual workflow executions |
-| `summaries` | Work summaries from agent or user |
-| `tasks` | Task cards (system of record) |
-| `task_events` | Append-only mutation log per task |
-| `agent_messages` | Structured messages from the agent |
-| `agent_connections` | Hashed agent tokens, one per user-GPT pairing |
-| `integration_connections` | External integration links (Gmail, Slack, Jira) |
-| `audit_logs` | Append-only audit trail for agent writes and task updates |
+> **Never commit real API keys, tokens, Supabase service role keys, user data, emails, Slack content, Jira content, or private company information.**
+
+See `docs/SECURITY.md` for the full security guide.
 
 ---
 
-## Task Status Flow
+## Documentation
 
-```
-open → in_progress → done → archived
-         ↓
-       waiting (snoozed)
-```
-
----
-
-## Phase Roadmap
-
-| Feature | Phase |
-|---------|-------|
-| Local SwiftData cache (legacy SwiftUI) | ✅ Phase 1 |
-| Face ID lock (legacy SwiftUI) | ✅ Phase 1 |
-| JSON export/import (debug only) | ✅ Phase 1 |
-| Supabase Postgres schema + RLS | ✅ Phase 2 (current) |
-| Supabase Auth in Expo app | ✅ Phase 2 (current) |
-| Supabase Edge Functions for agent | ✅ Phase 2 (current) |
-| ChatGPT agent connection UI in Expo app | ✅ Phase 2 (current) |
-| Supabase Realtime task refresh in Expo app | ✅ Phase 2 (current) |
-| Gmail integration (read + draft) | Phase 3 |
-| Slack integration (read + draft) | Phase 3 |
-| Jira integration (read + comment) | Phase 3 |
-| Email/Slack send via approval | Phase 3 |
-| Push notifications | Phase 3 |
-| TestFlight distribution | Phase 3 |
-| App Store | Not planned |
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow, Mermaid diagram |
+| [docs/SETUP_APP.md](docs/SETUP_APP.md) | Expo app setup guide |
+| [docs/SETUP_DATABASE.md](docs/SETUP_DATABASE.md) | Supabase schema, RLS, seed data |
+| [docs/SETUP_AGENT.md](docs/SETUP_AGENT.md) | Agent configuration and integration |
+| [docs/WORKFLOW.md](docs/WORKFLOW.md) | End-to-end daily workflow documentation |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security guide and best practices |
+| [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) | All environment variables documented |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common problems and fixes |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Planned features and phases |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute |
 
 ---
 
-## Non-Goals (Current Phase)
+## License
 
-- No automatic external sending (email, Slack, Jira) — approval required
-- No public App Store release
-- No direct Postgres access from Expo app or ChatGPT agent
-- No committed secrets (service role key, API keys, tokens)
-- No analytics
-
----
-
-## Security Notes
-
-See `docs/security.md` for full details.
-
-**Never commit:**
-- `.env` files
-- `*.p12` / `*.mobileprovision` / `AuthKey_*.p8` (applies to EAS/CI builds and any legacy iOS signing artifacts)
-- Supabase service role key
-- Agent connection tokens
-- Exported task data JSON files (`taskflow-export*.json`)
+[MIT](LICENSE)

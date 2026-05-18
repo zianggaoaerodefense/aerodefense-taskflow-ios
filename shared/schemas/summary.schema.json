@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://taskflow.internal/schemas/summary.schema.json",
+  "$id": "https://schemas.example.com/daily-workflow/summary.schema.json",
   "title": "Summary",
   "description": "A TaskFlow summary produced by the management agent or created manually from an email, Slack thread, or document.",
   "type": "object",

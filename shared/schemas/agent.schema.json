@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://taskflow.internal/schemas/agent.schema.json",
+  "$id": "https://schemas.example.com/daily-workflow/agent.schema.json",
   "title": "AgentRunResultsPayload",
   "description": "Request body for POST /agent/run-results. Submitted by the management agent after completing a scheduled or manual run. Requires an agent JWT with scope agent:summaries:create.",
   "type": "object",

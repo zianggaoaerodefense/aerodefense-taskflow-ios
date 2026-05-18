@@ -1,0 +1,54 @@
+{
+  "_comment": "This is an example agent payload. Use it to test the Import screen in the mobile app, or as a reference for agent output format.",
+  "_note": "Remove the _comment and _note fields before submitting to the agent-write endpoint.",
+  "summary": {
+    "title": "Daily Workflow Summary — 2024-01-15",
+    "content": "Good progress today. The main design review was completed and two pull requests are ready to merge pending final approval. The vendor follow-up email went out this morning.\n\nTwo items are carried over from last week: the API documentation update and the team retrospective notes. Both need attention before the end of the week.\n\nKey blocker: the staging environment is still showing intermittent errors that are blocking QA. This needs to be escalated."
+  },
+  "tasks": [
+    {
+      "title": "Merge pull request — feature/settings-screen",
+      "description": "Final approval received. Two reviewers approved. Ready to merge after confirming CI is green.",
+      "priority": "high",
+      "status": "open",
+      "source": "agent",
+      "due_at": null
+    },
+    {
+      "title": "Update API documentation",
+      "description": "Three new endpoints added last sprint are missing from the docs. Draft is started but needs review before publishing.",
+      "priority": "medium",
+      "status": "open",
+      "source": "agent",
+      "due_at": "2024-01-17T17:00:00Z"
+    },
+    {
+      "title": "Follow up on vendor proposal",
+      "description": "Initial email sent this morning. If no response by end of day tomorrow, follow up by phone.",
+      "priority": "medium",
+      "status": "open",
+      "source": "agent",
+      "due_at": "2024-01-16T17:00:00Z"
+    },
+    {
+      "title": "Investigate staging environment errors",
+      "description": "Intermittent 502 errors on the staging API are blocking QA. Check recent deploys and infra logs.",
+      "priority": "critical",
+      "status": "open",
+      "source": "agent",
+      "due_at": null
+    },
+    {
+      "title": "Finalise team retrospective notes",
+      "description": "Action items from last week's retrospective need to be documented and shared with the team.",
+      "priority": "low",
+      "status": "open",
+      "source": "agent",
+      "due_at": "2024-01-19T12:00:00Z"
+    }
+  ],
+  "agent_message": {
+    "content": "Morning workflow complete. Created 5 tasks based on current project status and carried-over items. Priority: staging environment errors are blocking QA and should be addressed first.",
+    "role": "agent"
+  }
+}
