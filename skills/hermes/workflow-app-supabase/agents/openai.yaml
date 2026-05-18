@@ -43,8 +43,8 @@ skill_files:
 
 gpt_actions:
   base_url: "https://YOUR_PROJECT_REF.supabase.co/functions/v1"
-  auth_type: bearer_token
-  auth_header: Authorization
+  auth_type: custom_header
+  auth_header: X-Agent-Token
   auth_token_placeholder: "<agent_connection_token>"
   endpoints:
     - path: /agent-context

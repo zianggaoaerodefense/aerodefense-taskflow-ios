@@ -35,7 +35,7 @@ Replace `YOUR_PROJECT_REF` with your Supabase project reference (found in the Su
 All requests must include:
 
 ```
-Authorization: Bearer <agent_connection_token>
+X-Agent-Token: <agent_connection_token>
 Content-Type: application/json
 ```
 

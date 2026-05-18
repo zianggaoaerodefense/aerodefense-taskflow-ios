@@ -18,7 +18,7 @@ This skill is the bridge between the agent's reasoning output and the Supabase-b
 
 **Use when:** an HTTP/API tool is available in the agent runtime AND a secure `agent_connection_token` has been provided by the runtime connection.
 
-The agent calls Supabase Edge Functions directly over HTTPS. The token is passed as a bearer token in the `Authorization` header. User identity is resolved server-side from the token; the agent never supplies or receives a `user_id`.
+The agent calls Supabase Edge Functions directly over HTTPS. The token is passed in the `X-Agent-Token` request header. User identity is resolved server-side from the token; the agent never supplies or receives a `user_id`.
 
 See `references/supabase-api.md` for endpoint details and security rules.
 

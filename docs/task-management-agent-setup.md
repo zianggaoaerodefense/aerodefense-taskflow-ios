@@ -126,7 +126,7 @@ GET  https://YOUR_PROJECT_REF.supabase.co/functions/v1/agent-context
 Authentication uses an `agent_connection_token` generated in the app:
 
 ```
-Authorization: Bearer <agent_connection_token>
+X-Agent-Token: <agent_connection_token>
 ```
 
 The Edge Function:
