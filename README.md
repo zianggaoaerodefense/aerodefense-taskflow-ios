@@ -85,6 +85,8 @@ This repository contains:
 - The Expo React Native mobile app (`app/`)
 - The Supabase schema, RLS policies, and Edge Functions (`supabase/`)
 - Agent prompt templates and example payloads (`agent/`)
+- A reusable Task Management Agent skill package (`skills/hermes/workflow-app-supabase/`)
+- A reusable agent behaviour template (`templates/AGENTS.task-management-agent.md`)
 - Full documentation (`docs/`)
 
 **You must bring your own:**
@@ -94,6 +96,55 @@ This repository contains:
 - Email/Jira/Slack/GitHub credentials (for integrations you want to enable)
 - Agent runtime and scheduler (ChatGPT Custom GPT, cron job, GitHub Actions, cloud function, etc.)
 - API keys for any external services
+
+---
+
+## Task Management Agent Setup
+
+This repository includes a complete, open-source-safe agent setup that connects an AI agent to the workflow app. Here is what it does and how to adapt it.
+
+### What the agent does
+
+The Task Management Agent reads context from your work tools — email, chat, calendar, project tracker — and writes structured output (summaries, tasks, workflow updates) into Supabase. The workflow app displays this output. You review, accept, complete, or reject tasks. The next agent run reads your feedback and continues from there.
+
+### Files to edit when customising
+
+| File | What to edit |
+|------|-------------|
+| `skills/hermes/workflow-app-supabase/SKILL.md` | Main skill instructions — loaded into the agent's system prompt |
+| `skills/hermes/workflow-app-supabase/agents/openai.yaml` | GPT Action configuration — update the base URL and endpoint paths |
+| `templates/AGENTS.task-management-agent.md` | Full agent behaviour template — copy into your agent's system prompt and adapt |
+| `agent/prompts/daily_summary.md` | Daily summary instructions |
+| `agent/prompts/task_extraction.md` | Task extraction instructions |
+| `agent/prompts/security_rules.md` | Security constraints — include in every agent prompt, do not modify |
+
+### How to plug in your Supabase project
+
+1. Create a Supabase project at [supabase.com](https://supabase.com).
+2. Apply the schema: `supabase/migrations/20240101000000_initial_schema.sql`.
+3. Deploy the Edge Functions: `supabase/functions/`.
+4. In `skills/hermes/workflow-app-supabase/agents/openai.yaml`, replace `YOUR_PROJECT_REF` with your actual Supabase project reference.
+5. In the app, go to **Settings → Connect Agent → New Connection** to generate your `agent_connection_token`.
+6. Store the token securely in your agent runtime's secret management (e.g., as a GPT Action credential). Never hardcode it.
+
+### Choosing between Direct API Mode and Import JSON Mode
+
+| Mode | When to use | How it works |
+|------|-------------|--------------|
+| **Direct API Mode** | Your agent runtime has an HTTP/API tool (e.g., GPT Actions, Langchain tool, Claude tool) | Agent calls Edge Functions directly over HTTPS with a bearer token |
+| **Import JSON Mode** | No HTTP tool available, or simpler setup preferred | Agent returns a JSON object; you paste it into the app's Import screen |
+
+Both modes produce the same structured output. Direct API Mode is fully automated. Import JSON Mode is the safe fallback and requires one manual step.
+
+See `skills/hermes/workflow-app-supabase/SKILL.md` for the full execution instructions.
+
+### Security warning
+
+> **You must provide your own secure authentication path. Never embed the `agent_connection_token`, Supabase service role key, or any other secret in prompts, skill files, documentation, or agent outputs.**
+
+The agent token must be stored in the agent runtime's secret management only (e.g., a GPT Action's OAuth credential field, an environment variable, or a secrets manager). If you are using a ChatGPT Custom GPT, configure the token as a GPT Action bearer token credential — not in the system prompt.
+
+See `docs/SECURITY.md` and `docs/open-source-sanitization.md` for the full security guide.
 
 ---
 
@@ -326,12 +377,27 @@ See `docs/SECURITY.md` for the full security guide.
 | [docs/SETUP_APP.md](docs/SETUP_APP.md) | Expo app setup guide |
 | [docs/SETUP_DATABASE.md](docs/SETUP_DATABASE.md) | Supabase schema, RLS, seed data |
 | [docs/SETUP_AGENT.md](docs/SETUP_AGENT.md) | Agent configuration and integration |
+| [docs/task-management-agent-setup.md](docs/task-management-agent-setup.md) | Open-source agent architecture and setup guide |
+| [docs/connectors.md](docs/connectors.md) | Tool category mapping for connected sources |
+| [docs/open-source-sanitization.md](docs/open-source-sanitization.md) | Sanitization rules for contributors |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | End-to-end daily workflow documentation |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security guide and best practices |
 | [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) | All environment variables documented |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common problems and fixes |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Planned features and phases |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute |
+
+### Agent skill package
+
+| File | Description |
+|------|-------------|
+| [skills/hermes/workflow-app-supabase/SKILL.md](skills/hermes/workflow-app-supabase/SKILL.md) | Main skill — load into agent system prompt |
+| [skills/hermes/workflow-app-supabase/agents/openai.yaml](skills/hermes/workflow-app-supabase/agents/openai.yaml) | OpenAI Custom GPT descriptor |
+| [skills/hermes/workflow-app-supabase/references/record-schemas.md](skills/hermes/workflow-app-supabase/references/record-schemas.md) | Record types and field rules |
+| [skills/hermes/workflow-app-supabase/references/import-json-format.md](skills/hermes/workflow-app-supabase/references/import-json-format.md) | Import JSON schema and contract |
+| [skills/hermes/workflow-app-supabase/references/source-triage-rules.md](skills/hermes/workflow-app-supabase/references/source-triage-rules.md) | Source order and extraction rules |
+| [skills/hermes/workflow-app-supabase/references/supabase-api.md](skills/hermes/workflow-app-supabase/references/supabase-api.md) | Direct API mode documentation |
+| [templates/AGENTS.task-management-agent.md](templates/AGENTS.task-management-agent.md) | Full reusable agent behaviour template |
 
 ---
 
