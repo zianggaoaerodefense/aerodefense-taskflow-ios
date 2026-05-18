@@ -7,7 +7,7 @@ import { z } from 'zod';
  * - userId is NEVER accepted in any agent input schema. It is always sourced
  *   from the verified AgentAuthContext (JWT payload).
  * - Every agent endpoint must call requireScope() before processing.
- * - All external actions described here require explicit CTO approval before
+ * - All external actions described here require explicit user approval before
  *   any side-effect is triggered.
  */
 
@@ -46,7 +46,7 @@ export const AgentCreateApprovalRequestSchema = z.object({
   /**
    * Opaque payload describing the intended external action.
    * Must not contain plaintext credentials or API keys.
-   * The CTO must review and approve this before any execution occurs.
+   * The user must review and approve this before any execution occurs.
    */
   payload: z.record(z.unknown()),
   expiresAt: z.string().datetime().optional(),

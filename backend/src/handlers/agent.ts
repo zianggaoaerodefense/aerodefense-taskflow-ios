@@ -8,7 +8,7 @@
  *   the verified AgentAuthContext (JWT payload `userId` claim).
  * - Every agent action that mutates data requires an explicit scope check.
  * - Approval requests created here are in 'pending' status — they are NEVER
- *   auto-executed. Execution requires separate CTO action.
+ *   auto-executed. Execution requires separate user action.
  * - All external inputs are validated with Zod before use.
  */
 
@@ -171,7 +171,7 @@ export const submitRunResults = withAuth(
 // ---------------------------------------------------------------------------
 // GET /agent/pending-review
 //
-// Returns tasks + follow-up drafts that need CTO review.
+// Returns tasks + follow-up drafts that need user review.
 // Requires TASKS_READ scope.
 // ---------------------------------------------------------------------------
 
@@ -271,7 +271,7 @@ export const changes = withAuth(
 // ---------------------------------------------------------------------------
 // POST /agent/followup-drafts — scope: agent:followups:draft
 //
-// Agent creates a single follow-up draft for CTO review.
+// Agent creates a single follow-up draft for user review.
 // Body: { taskId, channelType, recipientOrTarget?, subject?, body }
 // Draft is created with status='draft' and createdBy='agent'.
 // ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ export const createFollowupDrafts = withAuth(
 // ---------------------------------------------------------------------------
 // POST /agent/approval-requests — scope: agent:approvals:create
 //
-// Agent creates a single approval request for CTO action.
+// Agent creates a single approval request for user action.
 // Body: { taskId?, draftId?, actionType, payload }
 // Request is created with status='pending' and createdBy='agent'.
 // Agent CANNOT execute the approval — only humans can via /approve + /mark-executed.

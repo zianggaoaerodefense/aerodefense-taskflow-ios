@@ -19,7 +19,6 @@ import {
   findSummaryById,
   insertSummary,
   updateSummary,
-  addTaskCandidates,
   addLinkedTask,
   archiveSummary,
 } from '../db/repositories/summaryRepo';
@@ -27,7 +26,6 @@ import { insertAuditEvent } from '../db/repositories/auditRepo';
 import {
   CreateSummarySchema,
   UpdateSummarySchema,
-  AcceptTasksSchema,
 } from '../schemas/summary';
 import {
   successResponse,

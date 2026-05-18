@@ -151,7 +151,7 @@ Exit criteria:
 
 ### Phase 3 — iPhone daily workflow hardening
 
-Goal: make the iPhone workflow fast, safe, and clear for a CTO daily review loop.
+Goal: make the iPhone workflow fast, safe, and clear for a daily review loop.
 
 Tasks:
 
@@ -164,7 +164,7 @@ Tasks:
 
 Exit criteria:
 
-- A CTO can triage new agent items, accept task candidates, reprioritize tasks, mark tasks done, review a draft, approve/reject an approval request, and understand sync state from an iPhone.
+- The user can triage new agent items, accept task candidates, reprioritize tasks, mark tasks done, review a draft, approve/reject an approval request, and understand sync state from an iPhone.
 - Tokens are stored in Keychain in TestFlight builds.
 
 ### Phase 4 — Deployment/TestFlight readiness

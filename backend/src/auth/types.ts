@@ -17,7 +17,7 @@ export interface UserAuthContext {
   userId: string;
   /** Organisation the user belongs to. Used to enforce tenant isolation. */
   orgId: string;
-  /** RBAC roles assigned to this user, e.g. ['cto', 'admin']. */
+  /** RBAC roles assigned to this user, e.g. ['admin', 'owner']. */
   roles: string[];
 }
 
@@ -53,11 +53,11 @@ export const AGENT_SCOPES = {
   TASKS_READ: 'agent:tasks:read',
   /** Allows the agent to propose task candidates from a summary. */
   TASKS_SUGGEST: 'agent:tasks:suggest',
-  /** Allows the agent to create follow-up drafts for CTO review. */
+  /** Allows the agent to create follow-up drafts for user review. */
   FOLLOWUPS_DRAFT: 'agent:followups:draft',
   /**
    * Allows the agent to create approval-request documents.
-   * Approval requests are NEVER auto-executed — they require explicit CTO
+   * Approval requests are NEVER auto-executed — they require explicit user
    * action before any external side-effect is triggered.
    */
   APPROVALS_CREATE: 'agent:approvals:create',
