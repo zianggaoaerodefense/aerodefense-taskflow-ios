@@ -82,7 +82,7 @@ export default function TasksScreen() {
   // Realtime subscription: refresh when the agent creates or updates a task
   useEffect(() => {
     const channel = supabase
-      .channel('tasks-changes')
+      .channel(`tasks-changes-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tasks' },
