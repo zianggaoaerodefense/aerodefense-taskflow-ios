@@ -154,12 +154,26 @@ function findForbiddenKey(obj: unknown): string | null {
 }
 
 // Strip credential-like keys from a metadata object rather than rejecting the whole payload.
-const METADATA_STRIP_PATTERN = /key|token|secret|password|credential|auth|bearer|cookie|jwt/i
+// Exact matches and suffix/prefix patterns are used to avoid stripping benign keys like
+// "author", "oauth_provider", or "authority".
+const METADATA_STRIP_EXACT = new Set([
+  'key', 'token', 'secret', 'password', 'passwd', 'credential', 'credentials',
+  'bearer', 'cookie', 'cookies', 'jwt', 'authorization', 'auth_token',
+  'access_token', 'refresh_token', 'api_key', 'apikey', 'private_key', 'privatekey',
+])
+
+function shouldStripMetadataKey(k: string): boolean {
+  const lower = k.toLowerCase()
+  if (METADATA_STRIP_EXACT.has(lower)) return true
+  if (lower.endsWith('_key') || lower.endsWith('_token') || lower.endsWith('_secret') || lower.endsWith('_password')) return true
+  if (lower.startsWith('auth_')) return true
+  return false
+}
 
 function sanitizeMetadata(obj: Record<string, unknown>): Record<string, unknown> {
   const clean: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
-    if (METADATA_STRIP_PATTERN.test(k)) continue
+    if (shouldStripMetadataKey(k)) continue
     clean[k] = v
   }
   return clean
@@ -254,7 +268,13 @@ function parseTaskInput(t: Record<string, unknown>, i: number): ImportTaskInput 
     title: (t.title as string).trim(),
     description: typeof t.description === 'string' ? t.description.trim() || undefined : undefined,
     priority: priority as TaskPriority | undefined,
-    status: typeof t.status === 'string' && VALID_STATUSES.has(t.status) ? t.status : undefined,
+    status: (() => {
+      if (t.status === undefined || t.status === null) return undefined
+      if (typeof t.status !== 'string' || !VALID_STATUSES.has(t.status)) {
+        throw new Error(`tasks[${i}].status must be one of: open, in_progress, waiting, done, archived.`)
+      }
+      return t.status
+    })(),
     due_at: typeof t.due_at === 'string' ? parseIsoDate(t.due_at) : undefined,
     workflow_name: typeof t.workflow_name === 'string' ? t.workflow_name.trim() || undefined : undefined,
     project_name: typeof t.project_name === 'string' ? t.project_name.trim() || undefined : undefined,
@@ -458,21 +478,35 @@ export function buildPreview(payload: AgentImportPayload): ImportPreview {
 // Duplicate detection
 // ---------------------------------------------------------------------------
 
+// Map semantically equivalent source values together so that a task imported
+// with source='chatgpt_agent' matches an existing row stored as source='agent',
+// and a 'manual' import matches an existing 'user' row.
+const SOURCE_ALIASES: Record<string, string[]> = {
+  chatgpt_agent: ['chatgpt_agent', 'agent'],
+  agent:         ['chatgpt_agent', 'agent'],
+  manual:        ['manual', 'user'],
+  user:          ['manual', 'user'],
+}
+
 async function findDuplicateTaskId(
   userId: string,
   task: ImportTaskInput,
 ): Promise<string | null> {
   if (!task.source_ref) return null
 
-  const { data } = await supabase
+  const effectiveSource = task.source ?? 'chatgpt_agent'
+  const sourcesToCheck = SOURCE_ALIASES[effectiveSource] ?? [effectiveSource]
+
+  const { data, error } = await supabase
     .from('tasks')
     .select('id')
     .eq('user_id', userId)
-    .eq('source', task.source ?? 'chatgpt_agent')
+    .in('source', sourcesToCheck)
     .eq('source_ref', task.source_ref)
     .in('status', ['open', 'in_progress', 'waiting'])
     .limit(1)
 
+  if (error) throw error
   return data?.[0]?.id ?? null
 }
 
@@ -492,14 +526,17 @@ async function updateExistingTask(
   if (task.group_keys) updates.group_keys = task.group_keys
   if (task.metadata) updates.metadata = task.metadata
 
-  await supabase.from('tasks').update(updates).eq('id', taskId)
-  await supabase.from('task_events').insert({
+  const { error: updateError } = await supabase.from('tasks').update(updates).eq('id', taskId)
+  if (updateError) throw updateError
+
+  const { error: eventError } = await supabase.from('task_events').insert({
     user_id: userId,
     task_id: taskId,
     actor: 'agent',
     event_type: 'updated',
     details: { source: 'import_duplicate_update', source_ref: task.source_ref },
   })
+  if (eventError) throw eventError
 }
 
 // ---------------------------------------------------------------------------
@@ -543,33 +580,33 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
   const firstWorkflowId =
     workflowNameToId.size > 0 ? workflowNameToId.values().next().value : null
 
-  // 2. Insert summaries.
+  // 2. Insert all summaries; link tasks to the first one.
   let summaryId: string | null = null
   const summaries = payload.summaries ?? []
   if (summaries.length > 0) {
-    const first = summaries[0]
     const { data, error } = await supabase
       .from('summaries')
-      .insert({
-        user_id: userId,
-        title: first.title,
-        content: first.content ?? first.body ?? '',
-        source: 'agent',
-        status: 'active',
-        workflow_id: firstWorkflowId,
-        summary_date: first.summary_date ?? null,
-        source_coverage: first.source_coverage ?? [],
-        key_decisions: first.key_decisions ?? [],
-        blockers: first.blockers ?? [],
-        next_actions: first.next_actions ?? [],
-        category_breakdown: first.category_breakdown ?? {},
-        workflow_breakdown: first.workflow_breakdown ?? [],
-        recommended_views: first.recommended_views ?? [],
-      })
+      .insert(
+        summaries.map((s) => ({
+          user_id: userId,
+          title: s.title,
+          content: s.content ?? s.body ?? '',
+          source: 'agent',
+          status: 'active',
+          workflow_id: firstWorkflowId,
+          summary_date: s.summary_date ?? null,
+          source_coverage: s.source_coverage ?? [],
+          key_decisions: s.key_decisions ?? [],
+          blockers: s.blockers ?? [],
+          next_actions: s.next_actions ?? [],
+          category_breakdown: s.category_breakdown ?? {},
+          workflow_breakdown: s.workflow_breakdown ?? [],
+          recommended_views: s.recommended_views ?? [],
+        })),
+      )
       .select('id')
-      .single()
     if (error) throw error
-    summaryId = data.id
+    summaryId = data[0]?.id ?? null
   }
 
   // 3. Insert tasks with duplicate checking.
@@ -658,7 +695,7 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
       const { data: tasks, error: taskError } = await supabase
         .from('tasks')
         .insert(tasksToInsert)
-        .select('id, source, task_category, workflow_name, project_name')
+        .select('id, status, source_type, task_category, workflow_name, project_name')
       if (taskError) throw taskError
       taskCount = tasks.length
 
@@ -668,8 +705,8 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
           task_id: t.id,
           actor: 'agent',
           event_type: 'created',
-          new_status: 'open',
-          source_type: t.source ?? null,
+          new_status: t.status ?? 'open',
+          source_type: t.source_type ?? null,
           task_category: t.task_category ?? null,
           workflow_name: t.workflow_name ?? null,
           project_name: t.project_name ?? null,
