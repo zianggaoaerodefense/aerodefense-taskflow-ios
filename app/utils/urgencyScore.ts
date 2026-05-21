@@ -14,9 +14,18 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
+// Same local-date parsing as groupKeys.ts: date-only strings are local midnight.
+function parseDueDate(s: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+  return new Date(s)
+}
+
 function getTimeScore(due_at: string | null | undefined): number {
   if (!due_at) return 0
-  const due = new Date(due_at)
+  const due = parseDueDate(due_at)
   const today = startOfDay(new Date())
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)

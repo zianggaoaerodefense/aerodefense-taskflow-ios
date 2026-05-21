@@ -20,9 +20,20 @@ function addDays(d: Date, n: number): Date {
   return r
 }
 
+// Date-only strings (YYYY-MM-DD) are treated as UTC midnight by the Date constructor,
+// which shifts them to the previous local day for users west of UTC. Parse them as
+// local midnight instead to match the user's calendar day.
+function parseDueDate(s: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+  return new Date(s)
+}
+
 export function getTimeGroup(due_at: string | null | undefined): string {
   if (!due_at) return 'No Date'
-  const due = new Date(due_at)
+  const due = parseDueDate(due_at)
   const today = startOfDay(new Date())
   if (due < today) return 'Overdue'
   if (due < addDays(today, 1)) return 'Today'

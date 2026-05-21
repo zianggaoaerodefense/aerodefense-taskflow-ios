@@ -117,15 +117,22 @@ export interface ImportResult {
 // Rejects payloads that contain credential-like field names at any depth.
 // ---------------------------------------------------------------------------
 
-const FORBIDDEN_KEYS = new Set([
+// Identity keys must be rejected everywhere, including inside task metadata, because
+// they are server-side or user-scoped values that must never be accepted from input.
+// Credential keys are also rejected at the payload level but are sanitized (not
+// rejected) when they appear inside a task's metadata object.
+const ALWAYS_FORBIDDEN_KEYS = new Set([
   'user_id', 'userId',
   'service_role_key', 'serviceRoleKey',
+  'anon_key', 'anonKey',
+])
+
+const CREDENTIAL_KEYS = new Set([
   'api_key', 'apiKey',
   'api_secret', 'apiSecret',
   'token',
   'password', 'passwd',
   'secret',
-  'anon_key', 'anonKey',
   'bearer',
   'jwt',
   'access_token', 'accessToken',
@@ -137,20 +144,23 @@ const FORBIDDEN_KEYS = new Set([
   'cookie', 'cookies',
 ])
 
-function findForbiddenKey(obj: unknown): string | null {
+const FORBIDDEN_KEYS = new Set([...ALWAYS_FORBIDDEN_KEYS, ...CREDENTIAL_KEYS])
+
+function findForbiddenKey(obj: unknown, insideMetadata = false): string | null {
   if (obj === null || typeof obj !== 'object') return null
   if (Array.isArray(obj)) {
     for (const item of obj) {
-      const hit = findForbiddenKey(item)
+      const hit = findForbiddenKey(item, insideMetadata)
       if (hit) return hit
     }
     return null
   }
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-    if (FORBIDDEN_KEYS.has(key)) return key
-    // metadata values are sanitized by sanitizeMetadata() — skip recursing into them
-    if (key === 'metadata') continue
-    const hit = findForbiddenKey(value)
+    const isForbidden = insideMetadata ? ALWAYS_FORBIDDEN_KEYS.has(key) : FORBIDDEN_KEYS.has(key)
+    if (isForbidden) return key
+    // Inside metadata, credential keys are sanitized by sanitizeMetadata() so
+    // we only keep checking for identity keys (ALWAYS_FORBIDDEN_KEYS) via the flag.
+    const hit = findForbiddenKey(value, insideMetadata || key === 'metadata')
     if (hit) return hit
   }
   return null
@@ -377,10 +387,23 @@ export function parseAndValidate(text: string): AgentImportPayload {
         content: content.trim(),
         summary_date: (() => {
           if (sm.summary_date === undefined || sm.summary_date === null) return undefined
-          if (typeof sm.summary_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(sm.summary_date.trim()) || isNaN(Date.parse(sm.summary_date.trim()))) {
+          const rawDate = sm.summary_date.trim()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
             throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
           }
-          return sm.summary_date.trim()
+          // Date.parse rolls over impossible dates (e.g. Feb 31 → Mar 3) instead of
+          // returning NaN; comparing UTC components against the input catches those.
+          const parsed = new Date(rawDate)
+          const [y, mo, day] = rawDate.split('-').map(Number)
+          if (
+            isNaN(parsed.getTime()) ||
+            parsed.getUTCFullYear() !== y ||
+            parsed.getUTCMonth() + 1 !== mo ||
+            parsed.getUTCDate() !== day
+          ) {
+            throw new Error(`summaries[${i}].summary_date is not a valid calendar date.`)
+          }
+          return rawDate
         })(),
         source_coverage: Array.isArray(sm.source_coverage)
           ? (sm.source_coverage as unknown[]).filter((v): v is string => typeof v === 'string')
@@ -534,6 +557,9 @@ async function buildDupLookup(
     .eq('user_id', userId)
     .in('source_ref', sourceRefs)
     .in('status', ['open', 'in_progress', 'waiting'])
+    // Explicit limit overrides the project-level default row cap so existing rows
+    // are not silently truncated for users with many active tasks.
+    .limit(sourceRefs.length * 5)
   if (error) throw error
 
   const lookup = new Map<string, DupRow[]>()
@@ -674,10 +700,20 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
     const batchSeen = new Set<string>()
 
     for (const t of payload.tasks) {
-      const batchKey = t.source_ref
-        ? `${canonicalSource(t.source)}|${t.source_type ?? ''}|${t.source_ref}`
+      // Mirror lookupDupId semantics: absent source_type is a wildcard.
+      // batchKeyPartial covers the case where one task omits source_type and
+      // another provides it; batchKeyFull handles exact-subtype dedup.
+      const batchKeyPartial = t.source_ref
+        ? `${canonicalSource(t.source)}|${t.source_ref}`
         : null
-      if (batchKey && batchSeen.has(batchKey)) {
+      const batchKeyFull =
+        batchKeyPartial && t.source_type
+          ? `${batchKeyPartial}|${t.source_type}`
+          : null
+      if (
+        (batchKeyPartial && batchSeen.has(batchKeyPartial)) ||
+        (batchKeyFull && batchSeen.has(batchKeyFull))
+      ) {
         batchDuplicatesSkipped++
         continue
       }
@@ -687,11 +723,13 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
         await updateExistingTask(dupId, t, userId)
         skippedTaskIds.push(dupId)
         duplicatesUpdated++
-        if (batchKey) batchSeen.add(batchKey)
+        if (batchKeyPartial) batchSeen.add(batchKeyPartial)
+        if (batchKeyFull) batchSeen.add(batchKeyFull)
         continue
       }
 
-      if (batchKey) batchSeen.add(batchKey)
+      if (batchKeyPartial) batchSeen.add(batchKeyPartial)
+      if (batchKeyFull) batchSeen.add(batchKeyFull)
 
       const effectiveSource: TaskSource = t.source ?? 'chatgpt_agent'
       const tags = t.tags ?? []
