@@ -94,13 +94,25 @@ function isHighPriority(t: Task): boolean {
 
 function makeGroup(key: string, tasks: Task[]): TaskGroup {
   const sorted = sortTasks(tasks)
+  const activeTasks = tasks.filter(isActive)
+  const nextDue =
+    activeTasks
+      .filter((t) => t.due_at != null)
+      .reduce<Task | null>(
+        (earliest, t) =>
+          earliest === null ||
+          new Date(t.due_at!).getTime() < new Date(earliest.due_at!).getTime()
+            ? t
+            : earliest,
+        null,
+      )
   return {
     key,
     label: key,
     tasks: sorted,
-    openCount: tasks.filter(isActive).length,
-    highPriorityCount: tasks.filter(isHighPriority).length,
-    nextDue: sorted.find((t) => t.due_at && isActive(t)) ?? null,
+    openCount: activeTasks.length,
+    highPriorityCount: activeTasks.filter(isHighPriority).length,
+    nextDue,
   }
 }
 

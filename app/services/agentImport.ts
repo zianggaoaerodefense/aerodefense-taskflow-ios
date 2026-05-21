@@ -108,7 +108,8 @@ export interface ImportResult {
   taskCount: number
   workflowCount: number
   hasSummary: boolean
-  duplicatesSkipped: number
+  duplicatesUpdated: number
+  batchDuplicatesSkipped: number
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,8 @@ function findForbiddenKey(obj: unknown): string | null {
   }
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
     if (FORBIDDEN_KEYS.has(key)) return key
+    // metadata values are sanitized by sanitizeMetadata() — skip recursing into them
+    if (key === 'metadata') continue
     const hit = findForbiddenKey(value)
     if (hit) return hit
   }
@@ -496,6 +499,12 @@ export function buildPreview(payload: AgentImportPayload): ImportPreview {
 // Duplicate detection
 // ---------------------------------------------------------------------------
 
+function canonicalSource(s: string | undefined): string {
+  if (s === 'agent') return 'chatgpt_agent'
+  if (s === 'user') return 'manual'
+  return s ?? 'chatgpt_agent'
+}
+
 // Map semantically equivalent source values together so that a task imported
 // with source='chatgpt_agent' matches an existing row stored as source='agent',
 // and a 'manual' import matches an existing 'user' row.
@@ -506,33 +515,49 @@ const SOURCE_ALIASES: Record<string, string[]> = {
   user:          ['manual', 'user'],
 }
 
-async function findDuplicateTaskId(
-  userId: string,
-  task: ImportTaskInput,
-): Promise<string | null> {
-  if (!task.source_ref) return null
+type DupRow = { id: string; source: string; source_type: string | null }
 
+// Pre-fetch all active rows matching any incoming source_ref in a single query
+// to avoid per-task round-trips during the import loop.
+async function buildDupLookup(
+  userId: string,
+  tasks: ImportTaskInput[],
+): Promise<Map<string, DupRow[]>> {
+  const sourceRefs = [
+    ...new Set(tasks.filter((t) => t.source_ref).map((t) => t.source_ref as string)),
+  ]
+  if (sourceRefs.length === 0) return new Map()
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id, source, source_type, source_ref')
+    .eq('user_id', userId)
+    .in('source_ref', sourceRefs)
+    .in('status', ['open', 'in_progress', 'waiting'])
+  if (error) throw error
+
+  const lookup = new Map<string, DupRow[]>()
+  for (const row of data ?? []) {
+    const rows = lookup.get(row.source_ref) ?? []
+    rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
+    lookup.set(row.source_ref, rows)
+  }
+  return lookup
+}
+
+// Mirror the original per-task logic: when source_type is present, match strictly;
+// when absent, match any subtype sharing the same source + source_ref.
+function lookupDupId(lookup: Map<string, DupRow[]>, task: ImportTaskInput): string | null {
+  if (!task.source_ref) return null
+  const rows = lookup.get(task.source_ref) ?? []
   const effectiveSource = task.source ?? 'chatgpt_agent'
   const sourcesToCheck = SOURCE_ALIASES[effectiveSource] ?? [effectiveSource]
-
-  // Include source_type when present so that different entity types sharing the
-  // same numeric ref (e.g. GitHub PR #42 vs GitHub Issue #42) are not treated
-  // as the same task. When source_type is absent we match across all subtypes.
-  let query = supabase
-    .from('tasks')
-    .select('id')
-    .eq('user_id', userId)
-    .in('source', sourcesToCheck)
-    .eq('source_ref', task.source_ref)
-    .in('status', ['open', 'in_progress', 'waiting'])
-
-  if (task.source_type) {
-    query = query.eq('source_type', task.source_type)
+  for (const row of rows) {
+    if (!sourcesToCheck.includes(row.source)) continue
+    if (task.source_type && row.source_type !== task.source_type) continue
+    return row.id
   }
-
-  const { data, error } = await query.limit(1)
-  if (error) throw error
-  return data?.[0]?.id ?? null
+  return null
 }
 
 async function updateExistingTask(
@@ -636,29 +661,32 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
 
   // 3. Insert tasks with duplicate checking.
   let taskCount = 0
-  let duplicatesSkipped = 0
+  let duplicatesUpdated = 0
+  let batchDuplicatesSkipped = 0
 
   if (payload.tasks?.length) {
     const tasksToInsert: Record<string, unknown>[] = []
     const skippedTaskIds: string[] = []
+    // Pre-fetch all potential duplicates in one query to avoid N+1 round-trips.
+    const dupLookup = await buildDupLookup(userId, payload.tasks)
     // Track dedup keys seen within this batch so two tasks with the same
     // source_ref in a single payload don't both get inserted.
     const batchSeen = new Set<string>()
 
     for (const t of payload.tasks) {
       const batchKey = t.source_ref
-        ? `${t.source ?? 'chatgpt_agent'}|${t.source_type ?? ''}|${t.source_ref}`
+        ? `${canonicalSource(t.source)}|${t.source_type ?? ''}|${t.source_ref}`
         : null
       if (batchKey && batchSeen.has(batchKey)) {
-        duplicatesSkipped++
+        batchDuplicatesSkipped++
         continue
       }
 
-      const dupId = await findDuplicateTaskId(userId, t)
+      const dupId = lookupDupId(dupLookup, t)
       if (dupId) {
         await updateExistingTask(dupId, t, userId)
         skippedTaskIds.push(dupId)
-        duplicatesSkipped++
+        duplicatesUpdated++
         if (batchKey) batchSeen.add(batchKey)
         continue
       }
@@ -775,6 +803,7 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
     taskCount,
     workflowCount: workflowNameToId.size,
     hasSummary: !!summaryId,
-    duplicatesSkipped,
+    duplicatesUpdated,
+    batchDuplicatesSkipped,
   }
 }

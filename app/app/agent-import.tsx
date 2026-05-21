@@ -132,8 +132,11 @@ export default function AgentImportScreen() {
             <ResultLine label="Tasks created" value={result.taskCount} />
             <ResultLine label="Workflows created" value={result.workflowCount} />
             {result.hasSummary && <ResultLine label="Summary saved" value="Yes" />}
-            {result.duplicatesSkipped > 0 && (
-              <ResultLine label="Duplicates updated" value={result.duplicatesSkipped} />
+            {result.duplicatesUpdated > 0 && (
+              <ResultLine label="Duplicates updated" value={result.duplicatesUpdated} />
+            )}
+            {result.batchDuplicatesSkipped > 0 && (
+              <ResultLine label="Duplicates skipped" value={result.batchDuplicatesSkipped} />
             )}
           </View>
           <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/')}>
