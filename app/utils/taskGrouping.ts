@@ -100,7 +100,7 @@ function makeGroup(key: string, tasks: Task[]): TaskGroup {
     tasks: sorted,
     openCount: tasks.filter(isActive).length,
     highPriorityCount: tasks.filter(isHighPriority).length,
-    nextDue: sorted.find((t) => t.due_at) ?? null,
+    nextDue: sorted.find((t) => t.due_at && isActive(t)) ?? null,
   }
 }
 

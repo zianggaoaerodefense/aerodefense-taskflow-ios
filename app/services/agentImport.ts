@@ -170,15 +170,17 @@ function shouldStripMetadataKey(k: string): boolean {
   return false
 }
 
+function sanitizeValue(v: unknown): unknown {
+  if (v === null || typeof v !== 'object') return v
+  if (Array.isArray(v)) return v.map(sanitizeValue)
+  return sanitizeMetadata(v as Record<string, unknown>)
+}
+
 function sanitizeMetadata(obj: Record<string, unknown>): Record<string, unknown> {
   const clean: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
     if (shouldStripMetadataKey(k)) continue
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-      clean[k] = sanitizeMetadata(v as Record<string, unknown>)
-    } else {
-      clean[k] = v
-    }
+    clean[k] = sanitizeValue(v)
   }
   return clean
 }
@@ -450,6 +452,9 @@ export function parseAndValidate(text: string): AgentImportPayload {
   }
 
   // Agent messages — normalize legacy single object to array
+  if (obj.agent_messages !== undefined && !Array.isArray(obj.agent_messages)) {
+    throw new Error('"agent_messages" must be an array.')
+  }
   const rawMessages: unknown[] = []
   if (Array.isArray(obj.agent_messages)) rawMessages.push(...obj.agent_messages)
   if (obj.agent_message !== undefined) rawMessages.push(obj.agent_message)
@@ -510,15 +515,22 @@ async function findDuplicateTaskId(
   const effectiveSource = task.source ?? 'chatgpt_agent'
   const sourcesToCheck = SOURCE_ALIASES[effectiveSource] ?? [effectiveSource]
 
-  const { data, error } = await supabase
+  // Include source_type when present so that different entity types sharing the
+  // same numeric ref (e.g. GitHub PR #42 vs GitHub Issue #42) are not treated
+  // as the same task. When source_type is absent we match across all subtypes.
+  let query = supabase
     .from('tasks')
     .select('id')
     .eq('user_id', userId)
     .in('source', sourcesToCheck)
     .eq('source_ref', task.source_ref)
     .in('status', ['open', 'in_progress', 'waiting'])
-    .limit(1)
 
+  if (task.source_type) {
+    query = query.eq('source_type', task.source_type)
+  }
+
+  const { data, error } = await query.limit(1)
   if (error) throw error
   return data?.[0]?.id ?? null
 }
@@ -629,15 +641,29 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
   if (payload.tasks?.length) {
     const tasksToInsert: Record<string, unknown>[] = []
     const skippedTaskIds: string[] = []
+    // Track dedup keys seen within this batch so two tasks with the same
+    // source_ref in a single payload don't both get inserted.
+    const batchSeen = new Set<string>()
 
     for (const t of payload.tasks) {
+      const batchKey = t.source_ref
+        ? `${t.source ?? 'chatgpt_agent'}|${t.source_type ?? ''}|${t.source_ref}`
+        : null
+      if (batchKey && batchSeen.has(batchKey)) {
+        duplicatesSkipped++
+        continue
+      }
+
       const dupId = await findDuplicateTaskId(userId, t)
       if (dupId) {
         await updateExistingTask(dupId, t, userId)
         skippedTaskIds.push(dupId)
         duplicatesSkipped++
+        if (batchKey) batchSeen.add(batchKey)
         continue
       }
+
+      if (batchKey) batchSeen.add(batchKey)
 
       const effectiveSource: TaskSource = t.source ?? 'chatgpt_agent'
       const tags = t.tags ?? []
