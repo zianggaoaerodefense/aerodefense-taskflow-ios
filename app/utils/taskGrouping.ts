@@ -1,0 +1,157 @@
+// Utility: group and sort tasks for multi-dimensional views.
+
+import type { Task } from '../types/database'
+import { generateTaskGroupKeys, getTimeGroup } from './groupKeys'
+
+export type GroupViewMode =
+  | 'time'
+  | 'source'
+  | 'action'
+  | 'workflow'
+  | 'project'
+  | 'requester'
+  | 'priority'
+
+export const VIEW_MODE_LABELS: Record<GroupViewMode, string> = {
+  time: 'Time',
+  source: 'Source',
+  action: 'Action',
+  workflow: 'Workflow',
+  project: 'Project',
+  requester: 'Requester',
+  priority: 'Priority',
+}
+
+export const VIEW_MODES: GroupViewMode[] = [
+  'time',
+  'source',
+  'action',
+  'workflow',
+  'project',
+  'requester',
+  'priority',
+]
+
+export interface TaskGroup {
+  key: string
+  label: string
+  tasks: Task[]
+  openCount: number
+  highPriorityCount: number
+  nextDue: Task | null
+}
+
+const TIME_ORDER = ['Overdue', 'Today', 'Tomorrow', 'This Week', 'Later', 'No Date']
+const PRIORITY_ORDER = ['Critical', 'High', 'Medium', 'Low']
+
+const STATUS_RANK: Record<string, number> = {
+  open: 0,
+  in_progress: 1,
+  waiting: 2,
+  done: 3,
+  archived: 4,
+}
+const PRIORITY_RANK: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+}
+
+export function sortTasks(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const sa = STATUS_RANK[a.status] ?? 5
+    const sb = STATUS_RANK[b.status] ?? 5
+    if (sa !== sb) return sa - sb
+
+    const ua = a.urgency_score ?? 0
+    const ub = b.urgency_score ?? 0
+    if (ua !== ub) return ub - ua
+
+    if (a.due_at && b.due_at)
+      return new Date(a.due_at).getTime() - new Date(b.due_at).getTime()
+    if (a.due_at) return -1
+    if (b.due_at) return 1
+
+    const pa = PRIORITY_RANK[a.priority] ?? 4
+    const pb = PRIORITY_RANK[b.priority] ?? 4
+    if (pa !== pb) return pa - pb
+
+    if (a.last_source_at && b.last_source_at)
+      return new Date(b.last_source_at).getTime() - new Date(a.last_source_at).getTime()
+
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+}
+
+function isActive(t: Task): boolean {
+  return t.status === 'open' || t.status === 'in_progress' || t.status === 'waiting'
+}
+
+function isHighPriority(t: Task): boolean {
+  return t.priority === 'high' || t.priority === 'critical'
+}
+
+function makeGroup(key: string, tasks: Task[]): TaskGroup {
+  const sorted = sortTasks(tasks)
+  return {
+    key,
+    label: key,
+    tasks: sorted,
+    openCount: tasks.filter(isActive).length,
+    highPriorityCount: tasks.filter(isHighPriority).length,
+    nextDue: sorted.find((t) => t.due_at) ?? null,
+  }
+}
+
+function getGroupKey(task: Task, mode: GroupViewMode): string {
+  const keys = generateTaskGroupKeys(task)
+  switch (mode) {
+    case 'time': return keys.by_time
+    case 'source': return keys.by_source
+    case 'action': return keys.by_action
+    case 'workflow': return keys.by_workflow
+    case 'project': return keys.by_project
+    case 'requester': return keys.by_requester
+    case 'priority': {
+      const p = task.priority
+      return p === 'critical' ? 'Critical' : p === 'high' ? 'High' : p === 'medium' ? 'Medium' : 'Low'
+    }
+  }
+}
+
+export function groupTasks(tasks: Task[], mode: GroupViewMode): TaskGroup[] {
+  const map = new Map<string, Task[]>()
+  for (const task of tasks) {
+    const key = getGroupKey(task, mode)
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(task)
+  }
+
+  const groups = Array.from(map.entries()).map(([key, t]) => makeGroup(key, t))
+
+  if (mode === 'time') {
+    groups.sort((a, b) => {
+      const ai = TIME_ORDER.indexOf(a.key)
+      const bi = TIME_ORDER.indexOf(b.key)
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+    })
+  } else if (mode === 'priority') {
+    groups.sort((a, b) => {
+      const ai = PRIORITY_ORDER.indexOf(a.key)
+      const bi = PRIORITY_ORDER.indexOf(b.key)
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+    })
+  } else {
+    groups.sort((a, b) => {
+      if (b.openCount !== a.openCount) return b.openCount - a.openCount
+      return a.label.localeCompare(b.label)
+    })
+  }
+
+  return groups
+}
+
+export function getTaskTimeGroup(task: Task): string {
+  return getTimeGroup(task.due_at)
+}
