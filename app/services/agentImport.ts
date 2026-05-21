@@ -174,7 +174,11 @@ function sanitizeMetadata(obj: Record<string, unknown>): Record<string, unknown>
   const clean: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
     if (shouldStripMetadataKey(k)) continue
-    clean[k] = v
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      clean[k] = sanitizeMetadata(v as Record<string, unknown>)
+    } else {
+      clean[k] = v
+    }
   }
   return clean
 }
@@ -342,6 +346,9 @@ export function parseAndValidate(text: string): AgentImportPayload {
   }
 
   // Summaries — normalize legacy single object to array
+  if (obj.summaries !== undefined && !Array.isArray(obj.summaries)) {
+    throw new Error('"summaries" must be an array.')
+  }
   const rawSummaries: unknown[] = []
   if (Array.isArray(obj.summaries)) rawSummaries.push(...obj.summaries)
   if (obj.summary !== undefined) rawSummaries.push(obj.summary)
@@ -363,7 +370,13 @@ export function parseAndValidate(text: string): AgentImportPayload {
       return {
         title: sm.title.trim(),
         content: content.trim(),
-        summary_date: typeof sm.summary_date === 'string' ? sm.summary_date : undefined,
+        summary_date: (() => {
+          if (sm.summary_date === undefined || sm.summary_date === null) return undefined
+          if (typeof sm.summary_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(sm.summary_date.trim()) || isNaN(Date.parse(sm.summary_date.trim()))) {
+            throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
+          }
+          return sm.summary_date.trim()
+        })(),
         source_coverage: Array.isArray(sm.source_coverage)
           ? (sm.source_coverage as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
