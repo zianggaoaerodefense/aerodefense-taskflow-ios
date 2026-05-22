@@ -517,7 +517,7 @@ function TaskCard({ task, onComplete, onIgnore }: {
           {task.priority.toUpperCase()}
         </Text>
 
-        {task.source === 'agent' && !task.source_type && (
+        {(task.source === 'agent' || task.source === 'chatgpt_agent') && !task.source_type && (
           <View style={styles.agentBadge}>
             <Text style={styles.agentBadgeText}>Agent</Text>
           </View>

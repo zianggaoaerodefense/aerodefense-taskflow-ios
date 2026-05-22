@@ -146,21 +146,39 @@ const CREDENTIAL_KEYS = new Set([
 
 const FORBIDDEN_KEYS = new Set([...ALWAYS_FORBIDDEN_KEYS, ...CREDENTIAL_KEYS])
 
-function findForbiddenKey(obj: unknown, insideMetadata = false): string | null {
+// Full scan: rejects any FORBIDDEN_KEYS found anywhere in the object tree.
+// Call this on a payload with task metadata already stripped out.
+function findForbiddenKey(obj: unknown): string | null {
   if (obj === null || typeof obj !== 'object') return null
   if (Array.isArray(obj)) {
     for (const item of obj) {
-      const hit = findForbiddenKey(item, insideMetadata)
+      const hit = findForbiddenKey(item)
       if (hit) return hit
     }
     return null
   }
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-    const isForbidden = insideMetadata ? ALWAYS_FORBIDDEN_KEYS.has(key) : FORBIDDEN_KEYS.has(key)
-    if (isForbidden) return key
-    // Inside metadata, credential keys are sanitized by sanitizeMetadata() so
-    // we only keep checking for identity keys (ALWAYS_FORBIDDEN_KEYS) via the flag.
-    const hit = findForbiddenKey(value, insideMetadata || key === 'metadata')
+    if (FORBIDDEN_KEYS.has(key)) return key
+    const hit = findForbiddenKey(value)
+    if (hit) return hit
+  }
+  return null
+}
+
+// Identity-only scan: rejects ALWAYS_FORBIDDEN_KEYS (user_id, service_role_key, etc.)
+// used when scanning task metadata objects, where credential keys are sanitized instead.
+function findForbiddenKeyIdentityOnly(obj: unknown): string | null {
+  if (obj === null || typeof obj !== 'object') return null
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const hit = findForbiddenKeyIdentityOnly(item)
+      if (hit) return hit
+    }
+    return null
+  }
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (ALWAYS_FORBIDDEN_KEYS.has(key)) return key
+    const hit = findForbiddenKeyIdentityOnly(value)
     if (hit) return hit
   }
   return null
@@ -171,7 +189,7 @@ function findForbiddenKey(obj: unknown, insideMetadata = false): string | null {
 // "author", "oauth_provider", or "authority".
 const METADATA_STRIP_EXACT = new Set([
   'key', 'token', 'secret', 'password', 'passwd', 'credential', 'credentials',
-  'bearer', 'cookie', 'cookies', 'jwt', 'authorization', 'auth_token',
+  'bearer', 'cookie', 'cookies', 'jwt', 'authorization',
   'access_token', 'accesstoken',
   'refresh_token', 'refreshtoken',
   'auth_token', 'authtoken',
@@ -336,14 +354,45 @@ export function parseAndValidate(text: string): AgentImportPayload {
     throw new Error('Expected a JSON object at the top level.')
   }
 
-  const forbidden = findForbiddenKey(raw)
+  const obj = raw as Record<string, unknown>
+
+  // Strip task metadata before the full forbidden-key scan so that credential
+  // keys inside tasks[i].metadata are sanitized (not rejected). Identity fields
+  // (user_id, service_role_key, etc.) are still rejected even inside metadata.
+  const rawForScan: Record<string, unknown> = { ...obj }
+  if (Array.isArray(rawForScan.tasks)) {
+    rawForScan.tasks = (rawForScan.tasks as unknown[]).map((t) => {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { metadata: _metadata, ...rest } = t as Record<string, unknown>
+        return rest
+      }
+      return t
+    })
+  }
+
+  const forbidden = findForbiddenKey(rawForScan)
   if (forbidden) {
     throw new Error(
       `Refused: JSON contains the field "${forbidden}". Remove any credentials or IDs before importing.`,
     )
   }
 
-  const obj = raw as Record<string, unknown>
+  if (Array.isArray(obj.tasks)) {
+    for (const t of obj.tasks as unknown[]) {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        const meta = (t as Record<string, unknown>).metadata
+        if (meta) {
+          const identityHit = findForbiddenKeyIdentityOnly(meta)
+          if (identityHit) {
+            throw new Error(
+              `Refused: task metadata contains the field "${identityHit}". Remove identity fields before importing.`,
+            )
+          }
+        }
+      }
+    }
+  }
 
   // Support both legacy (summary/agent_message) and new format (summaries[]/agent_messages[])
   const hasSummary = obj.summary !== undefined || (Array.isArray(obj.summaries) && obj.summaries.length > 0)
@@ -559,34 +608,37 @@ async function buildDupLookup(
   ]
   if (sourceRefs.length === 0) return new Map()
 
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('id, source, source_type, source_ref')
-    .eq('user_id', userId)
-    .in('source_ref', sourceRefs)
-    .in('status', ['open', 'in_progress', 'waiting'])
+  // Chunk source_refs to avoid PostgREST URL length limits.
+  const CHUNK_SIZE = 50
+  const chunks: string[][] = []
+  for (let i = 0; i < sourceRefs.length; i += CHUNK_SIZE) {
+    chunks.push(sourceRefs.slice(i, i + CHUNK_SIZE))
+  }
 
-  // Paginate in 1000-row pages so no matching rows are missed regardless of
+  // Paginate in 1000-row pages per chunk so no rows are missed regardless of
   // the project-level Supabase max-rows setting or account size.
   const lookup = new Map<string, DupRow[]>()
   const PAGE_SIZE = 1000
-  let from = 0
-  while (true) {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('id, source, source_type, source_ref')
-      .eq('user_id', userId)
-      .in('source_ref', sourceRefs)
-      .in('status', ['open', 'in_progress', 'waiting'])
-      .range(from, from + PAGE_SIZE - 1)
-    if (error) throw error
-    for (const row of data ?? []) {
-      const rows = lookup.get(row.source_ref) ?? []
-      rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
-      lookup.set(row.source_ref, rows)
+  for (const chunk of chunks) {
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('id, source, source_type, source_ref')
+        .eq('user_id', userId)
+        .in('source_ref', chunk)
+        .in('status', ['open', 'in_progress', 'waiting'])
+        .order('id')
+        .range(from, from + PAGE_SIZE - 1)
+      if (error) throw error
+      for (const row of data ?? []) {
+        const rows = lookup.get(row.source_ref) ?? []
+        rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
+        lookup.set(row.source_ref, rows)
+      }
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
     }
-    if (!data || data.length < PAGE_SIZE) break
-    from += PAGE_SIZE
   }
   return lookup
 }

@@ -77,8 +77,11 @@ export function sortTasks(tasks: Task[]): Task[] {
     const pb = PRIORITY_RANK[b.priority] ?? 4
     if (pa !== pb) return pa - pb
 
-    if (a.last_source_at && b.last_source_at)
+    if (a.last_source_at || b.last_source_at) {
+      if (!a.last_source_at) return 1
+      if (!b.last_source_at) return -1
       return new Date(b.last_source_at).getTime() - new Date(a.last_source_at).getTime()
+    }
 
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
