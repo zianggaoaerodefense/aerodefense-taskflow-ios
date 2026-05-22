@@ -392,6 +392,9 @@ export function parseAndValidate(text: string): AgentImportPayload {
         content: content.trim(),
         summary_date: (() => {
           if (sm.summary_date === undefined || sm.summary_date === null) return undefined
+          if (typeof sm.summary_date !== 'string') {
+            throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
+          }
           const rawDate = sm.summary_date.trim()
           if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
             throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
@@ -562,19 +565,28 @@ async function buildDupLookup(
     .eq('user_id', userId)
     .in('source_ref', sourceRefs)
     .in('status', ['open', 'in_progress', 'waiting'])
-    // Explicit limit overrides the project-level default row cap so existing rows
-    // are not silently truncated for users with many active tasks.
-    // Use a fixed 1000-row limit to override lower project defaults while keeping
-    // the query bounded. Import payloads are small (agent daily digests), so the
-    // total matching rows is far below 1000 in any realistic scenario.
-    .limit(1000)
-  if (error) throw error
 
+  // Paginate in 1000-row pages so no matching rows are missed regardless of
+  // the project-level Supabase max-rows setting or account size.
   const lookup = new Map<string, DupRow[]>()
-  for (const row of data ?? []) {
-    const rows = lookup.get(row.source_ref) ?? []
-    rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
-    lookup.set(row.source_ref, rows)
+  const PAGE_SIZE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('id, source, source_type, source_ref')
+      .eq('user_id', userId)
+      .in('source_ref', sourceRefs)
+      .in('status', ['open', 'in_progress', 'waiting'])
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    for (const row of data ?? []) {
+      const rows = lookup.get(row.source_ref) ?? []
+      rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
+      lookup.set(row.source_ref, rows)
+    }
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
   }
   return lookup
 }
