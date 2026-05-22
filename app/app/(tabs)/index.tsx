@@ -29,9 +29,12 @@ import {
   groupTasks,
   sortTasks,
   type GroupViewMode,
+  type SortKey,
   type TaskGroup,
   VIEW_MODES,
   VIEW_MODE_LABELS,
+  SORT_KEYS,
+  SORT_KEY_LABELS,
 } from '../../utils/taskGrouping'
 
 // ---------------------------------------------------------------------------
@@ -93,6 +96,27 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
 }
 const ACTION_BTN_W = 90
 
+// Canonical source keys used in the filter panel (normalized aliases)
+const FILTER_SOURCES = ['email', 'slack', 'github', 'jira', 'calendar', 'agent', 'manual'] as const
+type FilterSource = typeof FILTER_SOURCES[number]
+
+type StatusFilter = 'active' | 'all' | 'done'
+type TimePreset = 'all' | 'today' | 'week' | 'month'
+
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+}
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d)
+  r.setDate(r.getDate() + n)
+  return r
+}
+function canonicalSource(src: string): string {
+  if (src === 'chatgpt_agent') return 'agent'
+  if (src === 'user') return 'manual'
+  return src
+}
+
 // ---------------------------------------------------------------------------
 // TasksScreen
 // ---------------------------------------------------------------------------
@@ -109,8 +133,21 @@ export default function TasksScreen() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [modalVisible, setModalVisible] = useState(false)
+  const [createVisible, setCreateVisible] = useState(false)
+  const [filterVisible, setFilterVisible] = useState(false)
+
+  // View / sort
   const [viewMode, setViewMode] = useState<GroupViewMode>('time')
+  const [sortKey, setSortKey] = useState<SortKey>('urgency')
+
+  // Filters — default: hide done/archived
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
+  const [sourcesFilter, setSourcesFilter] = useState<Set<FilterSource>>(new Set())
+  const [duePreset, setDuePreset] = useState<TimePreset>('all')
+  const [createdPreset, setCreatedPreset] = useState<TimePreset>('all')
+
+  // Collapsed group keys
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true)
@@ -140,24 +177,93 @@ export default function TasksScreen() {
     return () => { supabase.removeChannel(channel) }
   }, [load])
 
+  // Count active non-default filters (excludes sortKey so it stays clean)
+  const activeFilterCount = useMemo(() => {
+    let n = 0
+    if (statusFilter !== 'active') n++
+    if (sourcesFilter.size > 0) n++
+    if (duePreset !== 'all') n++
+    if (createdPreset !== 'all') n++
+    if (sortKey !== 'urgency') n++
+    return n
+  }, [statusFilter, sourcesFilter, duePreset, createdPreset, sortKey])
+
+  const filteredTasks = useMemo(() => {
+    const today = startOfDay(new Date())
+    let result = tasks
+
+    if (statusFilter === 'active') {
+      result = result.filter((t: Task) => t.status !== 'done' && t.status !== 'archived')
+    } else if (statusFilter === 'done') {
+      result = result.filter((t: Task) => t.status === 'done' || t.status === 'archived')
+    }
+
+    if (sourcesFilter.size > 0) {
+      result = result.filter((t: Task) => sourcesFilter.has(canonicalSource(t.source) as FilterSource))
+    }
+
+    if (duePreset !== 'all') {
+      result = result.filter((t: Task) => {
+        if (!t.due_at) return false
+        const due = new Date(t.due_at)
+        switch (duePreset) {
+          case 'today': return due >= today && due < addDays(today, 1)
+          case 'week':  return due < addDays(today, 7)
+          case 'month': return due < addDays(today, 30)
+          default:      return true
+        }
+      })
+    }
+
+    if (createdPreset !== 'all') {
+      result = result.filter((t: Task) => {
+        const created = new Date(t.created_at)
+        switch (createdPreset) {
+          case 'today': return created >= today
+          case 'week':  return created >= addDays(today, -7)
+          case 'month': return created >= addDays(today, -30)
+          default:      return true
+        }
+      })
+    }
+
+    return result
+  }, [tasks, statusFilter, sourcesFilter, duePreset, createdPreset])
+
   const sections = useMemo<TaskSection[]>(() => {
-    const groups = groupTasks(tasks, viewMode)
+    const groups = groupTasks(filteredTasks, viewMode, sortKey)
     return groups.map((g) => ({
       key: g.key,
       label: g.label,
       openCount: g.openCount,
       highPriorityCount: g.highPriorityCount,
       nextDue: g.nextDue,
-      data: g.tasks,
+      // Pass empty data for collapsed groups — header still renders
+      data: collapsedGroups.has(g.key) ? [] : g.tasks,
     }))
-  }, [tasks, viewMode])
+  }, [filteredTasks, viewMode, sortKey, collapsedGroups])
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups((prev: Set<string>) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function resetFilters() {
+    setStatusFilter('active')
+    setSourcesFilter(new Set())
+    setDuePreset('all')
+    setCreatedPreset('all')
+    setSortKey('urgency')
+  }
 
   async function handleComplete(task: Task) {
     try {
       await completeTask(task)
-      setTasks((prev: Task[]) =>
-        prev.map((t: Task) => (t.id === task.id ? { ...t, status: 'done' as TaskStatus } : t)),
-      )
+      setTasks((prev: Task[]) => prev.map((t: Task) => t.id === task.id ? { ...t, status: 'done' as TaskStatus } : t))
     } catch {
       Alert.alert('Error', 'Could not complete task.')
     }
@@ -185,11 +291,7 @@ export default function TasksScreen() {
     }
   }
 
-  async function handleCreate(input: {
-    title: string
-    description?: string
-    priority: TaskPriority
-  }) {
+  async function handleCreate(input: { title: string; description?: string; priority: TaskPriority }) {
     try {
       await createTask(input)
       await load(true)
@@ -206,22 +308,29 @@ export default function TasksScreen() {
     )
   }
 
-  const isEmpty = tasks.length === 0
+  const hasNoTasks = filteredTasks.length === 0
 
   return (
     <View style={styles.root}>
-      <ViewModePicker current={viewMode} onChange={setViewMode} />
+      <TopBar
+        viewMode={viewMode}
+        onViewMode={setViewMode}
+        activeFilterCount={activeFilterCount}
+        onFilter={() => setFilterVisible(true)}
+      />
       <SectionList<Task, TaskSection>
-        sections={sections}
+        sections={hasNoTasks ? [] : sections}
         keyExtractor={(t: Task) => t.id}
-        contentContainerStyle={isEmpty ? styles.center : styles.list}
+        contentContainerStyle={hasNoTasks ? styles.center : styles.list}
         stickySectionHeadersEnabled={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => load()} />
         }
         ListEmptyComponent={
           <Text style={styles.muted}>
-            No open tasks. Tap + to create one or the ChatGPT agent will add them here.
+            {tasks.length === 0
+              ? 'No tasks yet. Tap + to create one or import from the agent.'
+              : 'No tasks match your filters.'}
           </Text>
         }
         renderSectionHeader={({ section }: { section: TaskSection }) => (
@@ -230,6 +339,8 @@ export default function TasksScreen() {
             openCount={section.openCount as number}
             highPriorityCount={section.highPriorityCount as number}
             nextDue={section.nextDue as Task | null}
+            collapsed={collapsedGroups.has(section.key as string)}
+            onToggle={() => toggleGroup(section.key as string)}
           />
         )}
         renderItem={({ item }: { item: Task }) => (
@@ -243,60 +354,91 @@ export default function TasksScreen() {
       />
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => setModalVisible(true)}
+        onPress={() => setCreateVisible(true)}
         activeOpacity={0.85}
       >
         <Text style={styles.fabIcon}>+</Text>
       </TouchableOpacity>
       <CreateTaskModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        visible={createVisible}
+        onClose={() => setCreateVisible(false)}
         onCreate={async (input) => {
-          setModalVisible(false)
+          setCreateVisible(false)
           await handleCreate(input)
         }}
+      />
+      <FilterPanel
+        visible={filterVisible}
+        onClose={() => setFilterVisible(false)}
+        sortKey={sortKey}
+        setSortKey={setSortKey}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        sourcesFilter={sourcesFilter}
+        setSourcesFilter={setSourcesFilter}
+        duePreset={duePreset}
+        setDuePreset={setDuePreset}
+        createdPreset={createdPreset}
+        setCreatedPreset={setCreatedPreset}
+        onReset={resetFilters}
       />
     </View>
   )
 }
 
 // ---------------------------------------------------------------------------
-// ViewModePicker — horizontal scrollable chip selector
+// TopBar — view mode chips + filter button
 // ---------------------------------------------------------------------------
 
-function ViewModePicker({
-  current,
-  onChange,
+function TopBar({
+  viewMode,
+  onViewMode,
+  activeFilterCount,
+  onFilter,
 }: {
-  current: GroupViewMode
-  onChange: (m: GroupViewMode) => void
+  viewMode: GroupViewMode
+  onViewMode: (m: GroupViewMode) => void
+  activeFilterCount: number
+  onFilter: () => void
 }) {
   return (
-    <View style={picker.wrap}>
+    <View style={topbar.wrap}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={picker.scroll}
+        contentContainerStyle={topbar.scroll}
       >
         {VIEW_MODES.map((mode) => (
           <TouchableOpacity
             key={mode}
-            style={[picker.chip, current === mode && picker.chipActive]}
-            onPress={() => onChange(mode)}
+            style={[topbar.chip, viewMode === mode && topbar.chipActive]}
+            onPress={() => onViewMode(mode)}
             activeOpacity={0.75}
           >
-            <Text style={[picker.chipText, current === mode && picker.chipTextActive]}>
+            <Text style={[topbar.chipText, viewMode === mode && topbar.chipTextActive]}>
               {VIEW_MODE_LABELS[mode]}
             </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
+      <TouchableOpacity style={topbar.filterBtn} onPress={onFilter} activeOpacity={0.7}>
+        <View style={topbar.filterBtnInner}>
+          <Text style={[topbar.filterIcon, activeFilterCount > 0 && topbar.filterIconActive]}>
+            ⚙
+          </Text>
+          {activeFilterCount > 0 && (
+            <View style={topbar.badge}>
+              <Text style={topbar.badgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
     </View>
   )
 }
 
 // ---------------------------------------------------------------------------
-// GroupHeader
+// GroupHeader — tappable, collapses/expands tasks in the group
 // ---------------------------------------------------------------------------
 
 function GroupHeader({
@@ -304,15 +446,20 @@ function GroupHeader({
   openCount,
   highPriorityCount,
   nextDue,
+  collapsed,
+  onToggle,
 }: {
   label: string
   openCount: number
   highPriorityCount: number
   nextDue: Task | null
+  collapsed: boolean
+  onToggle: () => void
 }) {
   return (
-    <View style={gh.wrap}>
+    <TouchableOpacity onPress={onToggle} activeOpacity={0.7} style={gh.wrap}>
       <View style={gh.top}>
+        <Text style={gh.collapseChevron}>{collapsed ? '▸' : '▾'}</Text>
         <Text style={gh.label}>{label}</Text>
         <View style={gh.stats}>
           <Text style={gh.stat}>{openCount} open</Text>
@@ -321,12 +468,159 @@ function GroupHeader({
           )}
         </View>
       </View>
-      {nextDue && (
+      {!collapsed && nextDue && (
         <Text style={gh.nextDue} numberOfLines={1}>
           Next due: {fmtDate(nextDue.due_at!)} — {nextDue.title}
         </Text>
       )}
-    </View>
+    </TouchableOpacity>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FilterPanel — bottom sheet modal for sort + all filters
+// ---------------------------------------------------------------------------
+
+function FilterPanel({
+  visible,
+  onClose,
+  sortKey, setSortKey,
+  statusFilter, setStatusFilter,
+  sourcesFilter, setSourcesFilter,
+  duePreset, setDuePreset,
+  createdPreset, setCreatedPreset,
+  onReset,
+}: {
+  visible: boolean
+  onClose: () => void
+  sortKey: SortKey
+  setSortKey: (k: SortKey) => void
+  statusFilter: StatusFilter
+  setStatusFilter: (s: StatusFilter) => void
+  sourcesFilter: Set<FilterSource>
+  setSourcesFilter: (s: Set<FilterSource>) => void
+  duePreset: TimePreset
+  setDuePreset: (p: TimePreset) => void
+  createdPreset: TimePreset
+  setCreatedPreset: (p: TimePreset) => void
+  onReset: () => void
+}) {
+  function toggleSource(src: FilterSource) {
+    const next = new Set(sourcesFilter)
+    if (next.has(src)) next.delete(src)
+    else next.add(src)
+    setSourcesFilter(next)
+  }
+
+  const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+    { value: 'active', label: 'Active Only' },
+    { value: 'all',    label: 'All' },
+    { value: 'done',   label: 'Done & Archived' },
+  ]
+  const DUE_OPTIONS: { value: TimePreset; label: string }[] = [
+    { value: 'all',   label: 'Any' },
+    { value: 'today', label: 'Today' },
+    { value: 'week',  label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+  ]
+  const CREATED_OPTIONS: { value: TimePreset; label: string }[] = [
+    { value: 'all',   label: 'Any' },
+    { value: 'today', label: 'Today' },
+    { value: 'week',  label: 'Past Week' },
+    { value: 'month', label: 'Past Month' },
+  ]
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
+      <View style={fp.container}>
+        <View style={fp.header}>
+          <Text style={fp.title}>Filter & Sort</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={fp.done}>Done</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={fp.body} contentContainerStyle={fp.content}>
+
+          <Text style={fp.sectionLabel}>SORT BY</Text>
+          <View style={fp.chipRow}>
+            {SORT_KEYS.map((k) => (
+              <TouchableOpacity
+                key={k}
+                style={[fp.chip, sortKey === k && fp.chipActive]}
+                onPress={() => setSortKey(k)}
+                activeOpacity={0.75}
+              >
+                <Text style={[fp.chipText, sortKey === k && fp.chipTextActive]}>
+                  {SORT_KEY_LABELS[k]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={fp.sectionLabel}>SHOW</Text>
+          <View style={fp.chipRow}>
+            {STATUS_OPTIONS.map(({ value, label }) => (
+              <TouchableOpacity
+                key={value}
+                style={[fp.chip, statusFilter === value && fp.chipActive]}
+                onPress={() => setStatusFilter(value)}
+                activeOpacity={0.75}
+              >
+                <Text style={[fp.chipText, statusFilter === value && fp.chipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={fp.sectionLabel}>SOURCE</Text>
+          <View style={fp.chipRow}>
+            {FILTER_SOURCES.map((src) => (
+              <TouchableOpacity
+                key={src}
+                style={[fp.chip, sourcesFilter.has(src) && fp.chipActive]}
+                onPress={() => toggleSource(src)}
+                activeOpacity={0.75}
+              >
+                <Text style={[fp.chipText, sourcesFilter.has(src) && fp.chipTextActive]}>
+                  {getSourceLabel(src)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={fp.sectionLabel}>DUE DATE</Text>
+          <View style={fp.chipRow}>
+            {DUE_OPTIONS.map(({ value, label }) => (
+              <TouchableOpacity
+                key={value}
+                style={[fp.chip, duePreset === value && fp.chipActive]}
+                onPress={() => setDuePreset(value)}
+                activeOpacity={0.75}
+              >
+                <Text style={[fp.chipText, duePreset === value && fp.chipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={fp.sectionLabel}>CREATED</Text>
+          <View style={fp.chipRow}>
+            {CREATED_OPTIONS.map(({ value, label }) => (
+              <TouchableOpacity
+                key={value}
+                style={[fp.chip, createdPreset === value && fp.chipActive]}
+                onPress={() => setCreatedPreset(value)}
+                activeOpacity={0.75}
+              >
+                <Text style={[fp.chipText, createdPreset === value && fp.chipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity style={fp.resetBtn} onPress={onReset} activeOpacity={0.8}>
+            <Text style={fp.resetText}>Reset All Filters</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </Modal>
   )
 }
 
@@ -477,7 +771,6 @@ function TaskCard({ task, onComplete, onIgnore }: {
           </View>
         </View>
 
-        {/* Badges row: source + category */}
         <View style={styles.badgeRow}>
           <SourceBadge source={task.source} source_type={task.source_type} />
           {task.task_category && <CategoryBadge category={task.task_category} />}
@@ -489,7 +782,6 @@ function TaskCard({ task, onComplete, onIgnore }: {
           </Text>
         ) : null}
 
-        {/* Workflow / project / requester meta */}
         {(task.workflow_name || task.project_name || task.requester) && (
           <View style={styles.metaRow}>
             {task.workflow_name && (
@@ -504,7 +796,6 @@ function TaskCard({ task, onComplete, onIgnore }: {
           </View>
         )}
 
-        {/* Source title link */}
         {task.source_title && expanded && (
           <Text style={styles.sourceTitle} numberOfLines={1}>
             {task.source_title}
@@ -549,7 +840,7 @@ function TaskCard({ task, onComplete, onIgnore }: {
 }
 
 // ---------------------------------------------------------------------------
-// CreateTaskModal (unchanged)
+// CreateTaskModal
 // ---------------------------------------------------------------------------
 
 function CreateTaskModal({
@@ -726,8 +1017,10 @@ const badge = StyleSheet.create({
   text: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 })
 
-const picker = StyleSheet.create({
+const topbar = StyleSheet.create({
   wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E5EA',
@@ -741,6 +1034,22 @@ const picker = StyleSheet.create({
   chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   chipText: { fontSize: 13, fontWeight: '500', color: '#3C3C43' },
   chipTextActive: { color: '#fff' },
+  filterBtn: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: '#E5E5EA',
+  },
+  filterBtnInner: { position: 'relative', width: 24, height: 24, justifyContent: 'center', alignItems: 'center' },
+  filterIcon: { fontSize: 18, color: '#636366' },
+  filterIconActive: { color: '#007AFF' },
+  badge: {
+    position: 'absolute', top: -5, right: -7,
+    backgroundColor: '#FF3B30', borderRadius: 8,
+    minWidth: 16, height: 16,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
 })
 
 const gh = StyleSheet.create({
@@ -750,12 +1059,13 @@ const gh = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#C6C6C8',
   },
-  top: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  collapseChevron: { fontSize: 11, color: '#C6C6C8', width: 12 },
   label: { flex: 1, fontSize: 13, fontWeight: '700', color: '#3C3C43', textTransform: 'uppercase', letterSpacing: 0.5 },
   stats: { flexDirection: 'row', gap: 6 },
   stat: { fontSize: 11, color: '#8E8E93', fontWeight: '500' },
   statHigh: { color: '#FF3B30' },
-  nextDue: { fontSize: 11, color: '#636366', marginTop: 2 },
+  nextDue: { fontSize: 11, color: '#636366', marginTop: 2, marginLeft: 18 },
 })
 
 const swipe = StyleSheet.create({
@@ -763,6 +1073,39 @@ const swipe = StyleSheet.create({
   actions: { position: 'absolute', right: 0, top: 0, bottom: 0, flexDirection: 'row' },
   btn: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   btnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+})
+
+const fp = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#C6C6C8',
+  },
+  title: { fontSize: 17, fontWeight: '600', color: '#1a1a1a' },
+  done: { fontSize: 17, fontWeight: '600', color: '#007AFF' },
+  body: { flex: 1 },
+  content: { padding: 16, paddingBottom: 48, gap: 8 },
+  sectionLabel: {
+    fontSize: 12, fontWeight: '600', color: '#8E8E93',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12,
+  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderRadius: 16, borderWidth: 1, borderColor: '#C6C6C8',
+    backgroundColor: '#F2F2F7',
+  },
+  chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipText: { fontSize: 13, fontWeight: '500', color: '#3C3C43' },
+  chipTextActive: { color: '#fff' },
+  resetBtn: {
+    marginTop: 16, padding: 14, borderRadius: 12,
+    backgroundColor: '#FF3B3011', alignItems: 'center',
+    borderWidth: 1, borderColor: '#FF3B3033',
+  },
+  resetText: { fontSize: 15, fontWeight: '600', color: '#FF3B30' },
 })
 
 const modal = StyleSheet.create({
