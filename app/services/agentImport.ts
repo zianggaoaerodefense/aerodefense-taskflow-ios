@@ -172,7 +172,12 @@ function findForbiddenKey(obj: unknown, insideMetadata = false): string | null {
 const METADATA_STRIP_EXACT = new Set([
   'key', 'token', 'secret', 'password', 'passwd', 'credential', 'credentials',
   'bearer', 'cookie', 'cookies', 'jwt', 'authorization', 'auth_token',
-  'access_token', 'refresh_token', 'api_key', 'apikey', 'private_key', 'privatekey',
+  'access_token', 'accesstoken',
+  'refresh_token', 'refreshtoken',
+  'auth_token', 'authtoken',
+  'session_token', 'sessiontoken',
+  'api_key', 'apikey', 'api_secret', 'apisecret',
+  'private_key', 'privatekey',
 ])
 
 function shouldStripMetadataKey(k: string): boolean {
@@ -559,7 +564,10 @@ async function buildDupLookup(
     .in('status', ['open', 'in_progress', 'waiting'])
     // Explicit limit overrides the project-level default row cap so existing rows
     // are not silently truncated for users with many active tasks.
-    .limit(sourceRefs.length * 5)
+    // Use a fixed 1000-row limit to override lower project defaults while keeping
+    // the query bounded. Import payloads are small (agent daily digests), so the
+    // total matching rows is far below 1000 in any realistic scenario.
+    .limit(1000)
   if (error) throw error
 
   const lookup = new Map<string, DupRow[]>()
@@ -697,23 +705,32 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
     const dupLookup = await buildDupLookup(userId, payload.tasks)
     // Track dedup keys seen within this batch so two tasks with the same
     // source_ref in a single payload don't both get inserted.
-    const batchSeen = new Set<string>()
+    // batchSeen: canonical|source_ref → set of source_types already processed.
+    // Empty string means a no-source_type (wildcard) task was processed.
+    // Mirrors lookupDupId semantics exactly:
+    //   - task WITH source_type X: dup if X or '' (wildcard) already in set
+    //   - task WITHOUT source_type: dup if any variant already in set
+    // This prevents two tasks with different subtypes (e.g. GitHub PR vs Issue)
+    // from collapsing into the same batch slot.
+    const batchSeen = new Map<string, Set<string>>()
+
+    function isBatchDup(task: ImportTaskInput): boolean {
+      if (!task.source_ref) return false
+      const seen = batchSeen.get(`${canonicalSource(task.source)}|${task.source_ref}`)
+      if (!seen) return false
+      return task.source_type ? (seen.has(task.source_type) || seen.has('')) : seen.size > 0
+    }
+
+    function markBatchSeen(task: ImportTaskInput): void {
+      if (!task.source_ref) return
+      const key = `${canonicalSource(task.source)}|${task.source_ref}`
+      const existing = batchSeen.get(key) ?? new Set<string>()
+      existing.add(task.source_type ?? '')
+      batchSeen.set(key, existing)
+    }
 
     for (const t of payload.tasks) {
-      // Mirror lookupDupId semantics: absent source_type is a wildcard.
-      // batchKeyPartial covers the case where one task omits source_type and
-      // another provides it; batchKeyFull handles exact-subtype dedup.
-      const batchKeyPartial = t.source_ref
-        ? `${canonicalSource(t.source)}|${t.source_ref}`
-        : null
-      const batchKeyFull =
-        batchKeyPartial && t.source_type
-          ? `${batchKeyPartial}|${t.source_type}`
-          : null
-      if (
-        (batchKeyPartial && batchSeen.has(batchKeyPartial)) ||
-        (batchKeyFull && batchSeen.has(batchKeyFull))
-      ) {
+      if (isBatchDup(t)) {
         batchDuplicatesSkipped++
         continue
       }
@@ -723,13 +740,11 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
         await updateExistingTask(dupId, t, userId)
         skippedTaskIds.push(dupId)
         duplicatesUpdated++
-        if (batchKeyPartial) batchSeen.add(batchKeyPartial)
-        if (batchKeyFull) batchSeen.add(batchKeyFull)
+        markBatchSeen(t)
         continue
       }
 
-      if (batchKeyPartial) batchSeen.add(batchKeyPartial)
-      if (batchKeyFull) batchSeen.add(batchKeyFull)
+      markBatchSeen(t)
 
       const effectiveSource: TaskSource = t.source ?? 'chatgpt_agent'
       const tags = t.tags ?? []
