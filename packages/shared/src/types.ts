@@ -1,4 +1,4 @@
-// Shared TypeScript types for TaskFlow.
+// Shared TypeScript types for the Daily Workflow App.
 // These mirror the Postgres schema in supabase/migrations/
 // and the request/response shapes of the Edge Functions.
 
@@ -15,6 +15,34 @@ export interface Profile {
   updated_at: string;
 }
 
+export type TaskSource =
+  | "email"
+  | "slack"
+  | "calendar"
+  | "jira"
+  | "github"
+  | "chatgpt_agent"
+  | "manual"
+  | "agent"   // legacy
+  | "user";   // legacy
+
+export type TaskCategory =
+  | "review"
+  | "respond"
+  | "approve"
+  | "follow_up"
+  | "schedule"
+  | "prepare"
+  | "investigate"
+  | "implement"
+  | "test"
+  | "deploy"
+  | "decide"
+  | "summarize"
+  | "monitor"
+  | "delegate"
+  | "blocked";
+
 export interface Workflow {
   id: string;
   user_id: string;
@@ -22,6 +50,23 @@ export interface Workflow {
   description: string | null;
   status: "active" | "paused" | "archived";
   config: Record<string, unknown>;
+  // Enriched fields
+  objective: string | null;
+  current_focus: string | null;
+  cadence: string | null;
+  next_review_at: string | null;
+  project_name: string | null;
+  workflow_category: string | null;
+  primary_sources: string[];
+  related_people: string[];
+  related_repos: string[];
+  related_jira_projects: string[];
+  related_slack_channels: string[];
+  related_customers: string[];
+  sort_order: number;
+  active_task_count: number;
+  blocked_task_count: number;
+  high_priority_task_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +81,13 @@ export interface WorkflowRun {
   error: string | null;
   started_at: string;
   completed_at: string | null;
+  // Enriched fields
+  source_coverage: string[];
+  tasks_created_count: number;
+  tasks_updated_count: number;
+  duplicates_skipped_count: number;
+  summaries_created_count: number;
+  workflows_created_or_updated_count: number;
   created_at: string;
 }
 
@@ -48,13 +100,21 @@ export interface Summary {
   source: "agent" | "user" | "manual" | null;
   source_ref: string | null;
   status: "active" | "archived";
+  // Enriched fields
+  summary_date: string | null;
+  source_coverage: string[];
+  key_decisions: string[];
+  blockers: string[];
+  next_actions: string[];
+  category_breakdown: Record<string, unknown>;
+  workflow_breakdown: unknown[];
+  recommended_views: string[];
   created_at: string;
   updated_at: string;
 }
 
 export type TaskStatus = "open" | "in_progress" | "waiting" | "done" | "archived";
 export type TaskPriority = "low" | "medium" | "high" | "critical";
-export type TaskSource = "agent" | "user";
 
 export interface Task {
   id: string;
@@ -68,6 +128,26 @@ export interface Task {
   due_at: string | null;
   snoozed_until: string | null;
   source: TaskSource;
+  // Enriched source fields
+  source_type: string | null;
+  source_ref: string | null;
+  source_title: string | null;
+  source_url: string | null;
+  last_source_at: string | null;
+  // Categorization
+  task_category: TaskCategory | null;
+  task_subcategory: string | null;
+  workflow_name: string | null;
+  project_name: string | null;
+  requester: string | null;
+  owner: string | null;
+  // Grouping and scoring
+  tags: string[];
+  group_keys: Record<string, string>;
+  metadata: Record<string, unknown>;
+  urgency_score: number;
+  importance_score: number;
+  duplicate_check_note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +169,11 @@ export interface TaskEvent {
   previous_status: TaskStatus | null;
   new_status: TaskStatus | null;
   details: Record<string, unknown>;
+  // Enriched fields
+  source_type: string | null;
+  task_category: string | null;
+  workflow_name: string | null;
+  project_name: string | null;
   created_at: string;
 }
 
@@ -129,12 +214,30 @@ export interface AuditLog {
 }
 
 // ---------------------------------------------------------------------------
+// Agent import payload (enriched format from ChatGPT agent)
+// ---------------------------------------------------------------------------
+
+export interface AgentImportPayload {
+  version?: string;
+  generated_at?: string;
+  mode?: string;
+  source?: string;
+  summaries?: Partial<Summary>[];
+  workflows?: Partial<Workflow>[];
+  tasks?: Partial<Task>[];
+  workflow_runs?: Partial<WorkflowRun>[];
+  task_events?: Partial<TaskEvent>[];
+  agent_messages?: Pick<AgentMessage, "content">[];
+  audit_logs?: Partial<AuditLog>[];
+}
+
+// ---------------------------------------------------------------------------
 // Edge Function: agent-context response
 // ---------------------------------------------------------------------------
 
 export interface AgentContextResponse {
   as_of: string;
-  open_tasks: Pick<Task, "id" | "title" | "description" | "status" | "priority" | "due_at" | "created_at" | "updated_at">[];
+  open_tasks: Pick<Task, "id" | "title" | "description" | "status" | "priority" | "due_at" | "source" | "source_type" | "task_category" | "workflow_name" | "project_name" | "requester" | "urgency_score" | "created_at" | "updated_at">[];
   recently_completed_tasks: Pick<Task, "id" | "title" | "status" | "priority" | "due_at" | "updated_at">[];
   recent_task_events: Pick<TaskEvent, "id" | "task_id" | "actor" | "event_type" | "previous_status" | "new_status" | "details" | "created_at">[];
   active_workflows: Pick<Workflow, "id" | "name" | "description" | "status" | "created_at">[];
@@ -159,6 +262,13 @@ export interface AgentWriteTaskInput {
   priority?: TaskPriority;
   due_at?: string;
   workflow_id?: string;
+  source?: TaskSource;
+  source_type?: string;
+  source_ref?: string;
+  task_category?: TaskCategory;
+  project_name?: string;
+  requester?: string;
+  tags?: string[];
 }
 
 export interface AgentWriteMessageInput {

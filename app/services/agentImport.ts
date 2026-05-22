@@ -9,9 +9,12 @@
 // - audit_logs INSERT is service-role-only (RLS); task_events rows provide
 //   the audit trail for imported tasks from the app side.
 // - All writes use the anon key + user JWT; RLS enforces ownership.
+// - Secret-like values are stripped from metadata before writing.
 
 import { supabase } from '../lib/supabase'
-import type { TaskPriority } from '../types/database'
+import type { TaskCategory, TaskPriority, TaskSource } from '../types/database'
+import { generateTaskGroupKeys } from '../utils/groupKeys'
+import { computeImportanceScore, computeUrgencyScore } from '../utils/urgencyScore'
 
 // ---------------------------------------------------------------------------
 // Payload types (what the agent is expected to produce)
@@ -19,31 +22,78 @@ import type { TaskPriority } from '../types/database'
 
 export interface ImportTaskInput {
   title: string
-  description?: string
+  description?: string | null
   priority?: TaskPriority
-  due_at?: string
-  workflow_name?: string
+  status?: string
+  due_at?: string | null
+  workflow_name?: string | null
+  project_name?: string | null
+  source?: TaskSource
+  source_type?: string | null
+  source_ref?: string | null
+  source_title?: string | null
+  source_url?: string | null
+  last_source_at?: string | null
+  task_category?: TaskCategory | null
+  task_subcategory?: string | null
+  requester?: string | null
+  owner?: string | null
+  tags?: string[]
+  group_keys?: Record<string, string>
+  metadata?: Record<string, unknown>
+  urgency_score?: number
+  importance_score?: number
 }
 
 export interface ImportWorkflowInput {
   name: string
   description?: string
+  objective?: string
+  project_name?: string | null
+  workflow_category?: string | null
+  primary_sources?: string[]
+  related_people?: string[]
+  related_repos?: string[]
+  related_jira_projects?: string[]
+  related_slack_channels?: string[]
+  related_customers?: string[]
 }
 
 export interface ImportSummaryInput {
   title: string
-  content: string
+  content?: string
+  body?: string
+  summary_date?: string | null
+  source_coverage?: string[]
+  key_decisions?: string[]
+  blockers?: string[]
+  next_actions?: string[]
+  category_breakdown?: Record<string, unknown>
+  workflow_breakdown?: unknown[]
+  recommended_views?: string[]
 }
 
 export interface ImportAgentMessageInput {
   content: string
 }
 
+// Supports both legacy format and new enriched format from the ChatGPT agent.
 export interface AgentImportPayload {
+  // New format
+  version?: string
+  generated_at?: string
+  mode?: string
+  summaries?: ImportSummaryInput[]
+  agent_messages?: ImportAgentMessageInput[]
+  // Legacy single-object format (normalized to arrays internally)
   summary?: ImportSummaryInput
+  agent_message?: ImportAgentMessageInput
+  // Shared
   workflows?: ImportWorkflowInput[]
   tasks?: ImportTaskInput[]
-  agent_message?: ImportAgentMessageInput
+  workflow_runs?: Record<string, unknown>[]
+  task_events?: Record<string, unknown>[]
+  audit_logs?: Record<string, unknown>[]
 }
 
 export interface ImportPreview {
@@ -51,12 +101,15 @@ export interface ImportPreview {
   workflowCount: number
   taskCount: number
   hasAgentMessage: boolean
+  enrichedTaskCount: number
 }
 
 export interface ImportResult {
   taskCount: number
   workflowCount: number
   hasSummary: boolean
+  duplicatesUpdated: number
+  batchDuplicatesSkipped: number
 }
 
 // ---------------------------------------------------------------------------
@@ -64,15 +117,22 @@ export interface ImportResult {
 // Rejects payloads that contain credential-like field names at any depth.
 // ---------------------------------------------------------------------------
 
-const FORBIDDEN_KEYS = new Set([
+// Identity keys must be rejected everywhere, including inside task metadata, because
+// they are server-side or user-scoped values that must never be accepted from input.
+// Credential keys are also rejected at the payload level but are sanitized (not
+// rejected) when they appear inside a task's metadata object.
+const ALWAYS_FORBIDDEN_KEYS = new Set([
   'user_id', 'userId',
   'service_role_key', 'serviceRoleKey',
+  'anon_key', 'anonKey',
+])
+
+const CREDENTIAL_KEYS = new Set([
   'api_key', 'apiKey',
   'api_secret', 'apiSecret',
   'token',
   'password', 'passwd',
   'secret',
-  'anon_key', 'anonKey',
   'bearer',
   'jwt',
   'access_token', 'accessToken',
@@ -81,8 +141,13 @@ const FORBIDDEN_KEYS = new Set([
   'credentials', 'credential',
   'auth_token', 'authToken',
   'session_token', 'sessionToken',
+  'cookie', 'cookies',
 ])
 
+const FORBIDDEN_KEYS = new Set([...ALWAYS_FORBIDDEN_KEYS, ...CREDENTIAL_KEYS])
+
+// Full scan: rejects any FORBIDDEN_KEYS found anywhere in the object tree.
+// Call this on a payload with task metadata already stripped out.
 function findForbiddenKey(obj: unknown): string | null {
   if (obj === null || typeof obj !== 'object') return null
   if (Array.isArray(obj)) {
@@ -100,11 +165,77 @@ function findForbiddenKey(obj: unknown): string | null {
   return null
 }
 
+// Identity-only scan: rejects ALWAYS_FORBIDDEN_KEYS (user_id, service_role_key, etc.)
+// used when scanning task metadata objects, where credential keys are sanitized instead.
+function findForbiddenKeyIdentityOnly(obj: unknown): string | null {
+  if (obj === null || typeof obj !== 'object') return null
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const hit = findForbiddenKeyIdentityOnly(item)
+      if (hit) return hit
+    }
+    return null
+  }
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (ALWAYS_FORBIDDEN_KEYS.has(key)) return key
+    const hit = findForbiddenKeyIdentityOnly(value)
+    if (hit) return hit
+  }
+  return null
+}
+
+// Strip credential-like keys from a metadata object rather than rejecting the whole payload.
+// Exact matches and suffix/prefix patterns are used to avoid stripping benign keys like
+// "author", "oauth_provider", or "authority".
+const METADATA_STRIP_EXACT = new Set([
+  'key', 'token', 'secret', 'password', 'passwd', 'credential', 'credentials',
+  'bearer', 'cookie', 'cookies', 'jwt', 'authorization',
+  'access_token', 'accesstoken',
+  'refresh_token', 'refreshtoken',
+  'auth_token', 'authtoken',
+  'session_token', 'sessiontoken',
+  'api_key', 'apikey', 'api_secret', 'apisecret',
+  'private_key', 'privatekey',
+])
+
+function shouldStripMetadataKey(k: string): boolean {
+  const lower = k.toLowerCase()
+  if (METADATA_STRIP_EXACT.has(lower)) return true
+  if (lower.endsWith('_key') || lower.endsWith('_token') || lower.endsWith('_secret') || lower.endsWith('_password')) return true
+  if (lower.startsWith('auth_')) return true
+  return false
+}
+
+function sanitizeValue(v: unknown): unknown {
+  if (v === null || typeof v !== 'object') return v
+  if (Array.isArray(v)) return v.map(sanitizeValue)
+  return sanitizeMetadata(v as Record<string, unknown>)
+}
+
+function sanitizeMetadata(obj: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (shouldStripMetadataKey(k)) continue
+    clean[k] = sanitizeValue(v)
+  }
+  return clean
+}
+
 // ---------------------------------------------------------------------------
-// Validation
+// Validation helpers
 // ---------------------------------------------------------------------------
 
-const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'critical'])
+const VALID_PRIORITIES = new Set<TaskPriority>(['low', 'medium', 'high', 'critical'])
+const VALID_STATUSES = new Set(['open', 'in_progress', 'waiting', 'done', 'archived'])
+const VALID_SOURCES = new Set<TaskSource>([
+  'email', 'slack', 'calendar', 'jira', 'github',
+  'chatgpt_agent', 'manual', 'agent', 'user',
+])
+const VALID_CATEGORIES = new Set<TaskCategory>([
+  'review', 'respond', 'approve', 'follow_up', 'schedule',
+  'prepare', 'investigate', 'implement', 'test', 'deploy',
+  'decide', 'summarize', 'monitor', 'delegate', 'blocked',
+])
 
 function parseIsoDate(s: string): string | undefined {
   const d = new Date(s)
@@ -112,13 +243,11 @@ function parseIsoDate(s: string): string | undefined {
 }
 
 // ChatGPT web renders typographic/smart quotes instead of ASCII quotes.
-// Normalization is applied only when the original text fails to parse, so
-// smart quotes that appear as literal characters inside valid JSON string
-// values are never corrupted.
+// Normalization is applied only when the original text fails to parse.
 function normalizeQuotes(text: string): string {
   return text
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
 }
 
 const PARSE_FAILED = Symbol()
@@ -127,10 +256,94 @@ function tryParse(s: string): unknown {
   try { return JSON.parse(s) } catch { return PARSE_FAILED }
 }
 
+// ---------------------------------------------------------------------------
+// Task field parsing
+// ---------------------------------------------------------------------------
+
+function parseTaskInput(t: Record<string, unknown>, i: number): ImportTaskInput {
+  if (typeof t.title !== 'string' || !t.title.trim()) {
+    throw new Error(`tasks[${i}].title must be a non-empty string.`)
+  }
+
+  const priority = t.priority as string | undefined
+  if (priority !== undefined && !VALID_PRIORITIES.has(priority as TaskPriority)) {
+    throw new Error(`tasks[${i}].priority must be one of: low, medium, high, critical.`)
+  }
+
+  const source = t.source as string | undefined
+  if (source !== undefined && !VALID_SOURCES.has(source as TaskSource)) {
+    throw new Error(
+      `tasks[${i}].source must be one of: email, slack, calendar, jira, github, chatgpt_agent, manual.`,
+    )
+  }
+
+  const task_category = t.task_category as string | undefined
+  if (task_category !== undefined && task_category !== null && !VALID_CATEGORIES.has(task_category as TaskCategory)) {
+    throw new Error(
+      `tasks[${i}].task_category must be one of the supported category values.`,
+    )
+  }
+
+  const rawMeta = t.metadata
+  let metadata: Record<string, unknown> | undefined
+  if (rawMeta !== undefined && rawMeta !== null) {
+    if (typeof rawMeta !== 'object' || Array.isArray(rawMeta)) {
+      throw new Error(`tasks[${i}].metadata must be an object.`)
+    }
+    metadata = sanitizeMetadata(rawMeta as Record<string, unknown>)
+  }
+
+  const tags = t.tags
+  if (tags !== undefined && !Array.isArray(tags)) {
+    throw new Error(`tasks[${i}].tags must be an array.`)
+  }
+  const safeTags = Array.isArray(tags)
+    ? (tags as unknown[]).filter((v): v is string => typeof v === 'string')
+    : undefined
+
+  const group_keys = t.group_keys
+  if (group_keys !== undefined && group_keys !== null && (typeof group_keys !== 'object' || Array.isArray(group_keys))) {
+    throw new Error(`tasks[${i}].group_keys must be an object.`)
+  }
+
+  return {
+    title: (t.title as string).trim(),
+    description: typeof t.description === 'string' ? t.description.trim() || undefined : undefined,
+    priority: priority as TaskPriority | undefined,
+    status: (() => {
+      if (t.status === undefined || t.status === null) return undefined
+      if (typeof t.status !== 'string' || !VALID_STATUSES.has(t.status)) {
+        throw new Error(`tasks[${i}].status must be one of: open, in_progress, waiting, done, archived.`)
+      }
+      return t.status
+    })(),
+    due_at: typeof t.due_at === 'string' ? parseIsoDate(t.due_at) : undefined,
+    workflow_name: typeof t.workflow_name === 'string' ? t.workflow_name.trim() || undefined : undefined,
+    project_name: typeof t.project_name === 'string' ? t.project_name.trim() || undefined : undefined,
+    source: source as TaskSource | undefined,
+    source_type: typeof t.source_type === 'string' ? t.source_type.trim() || undefined : undefined,
+    source_ref: typeof t.source_ref === 'string' ? t.source_ref.trim() || undefined : undefined,
+    source_title: typeof t.source_title === 'string' ? t.source_title.trim() || undefined : undefined,
+    source_url: typeof t.source_url === 'string' ? t.source_url.trim() || undefined : undefined,
+    last_source_at: typeof t.last_source_at === 'string' ? parseIsoDate(t.last_source_at) : undefined,
+    task_category: task_category as TaskCategory | undefined,
+    task_subcategory: typeof t.task_subcategory === 'string' ? t.task_subcategory.trim() || undefined : undefined,
+    requester: typeof t.requester === 'string' ? t.requester.trim() || undefined : undefined,
+    owner: typeof t.owner === 'string' ? t.owner.trim() || undefined : undefined,
+    tags: safeTags,
+    group_keys: group_keys != null ? (group_keys as Record<string, string>) : undefined,
+    metadata,
+    urgency_score: typeof t.urgency_score === 'number' ? Math.max(0, Math.round(t.urgency_score)) : undefined,
+    importance_score: typeof t.importance_score === 'number' ? Math.max(0, Math.round(t.importance_score)) : undefined,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Parse and validate
+// ---------------------------------------------------------------------------
+
 export function parseAndValidate(text: string): AgentImportPayload {
   const trimmed = text.trim()
-  // Try the original text first. Only normalize on failure so that string
-  // values containing typographic quotes are not corrupted.
   let raw = tryParse(trimmed)
   if (raw === PARSE_FAILED) raw = tryParse(normalizeQuotes(trimmed))
   if (raw === PARSE_FAILED) {
@@ -141,106 +354,337 @@ export function parseAndValidate(text: string): AgentImportPayload {
     throw new Error('Expected a JSON object at the top level.')
   }
 
-  const forbidden = findForbiddenKey(raw)
+  const obj = raw as Record<string, unknown>
+
+  // Strip task metadata before the full forbidden-key scan so that credential
+  // keys inside tasks[i].metadata are sanitized (not rejected). Identity fields
+  // (user_id, service_role_key, etc.) are still rejected even inside metadata.
+  const rawForScan: Record<string, unknown> = { ...obj }
+  if (Array.isArray(rawForScan.tasks)) {
+    rawForScan.tasks = (rawForScan.tasks as unknown[]).map((t) => {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { metadata: _metadata, ...rest } = t as Record<string, unknown>
+        return rest
+      }
+      return t
+    })
+  }
+
+  const forbidden = findForbiddenKey(rawForScan)
   if (forbidden) {
     throw new Error(
       `Refused: JSON contains the field "${forbidden}". Remove any credentials or IDs before importing.`,
     )
   }
 
-  const obj = raw as Record<string, unknown>
+  if (Array.isArray(obj.tasks)) {
+    for (const t of obj.tasks as unknown[]) {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        const meta = (t as Record<string, unknown>).metadata
+        if (meta) {
+          const identityHit = findForbiddenKeyIdentityOnly(meta)
+          if (identityHit) {
+            throw new Error(
+              `Refused: task metadata contains the field "${identityHit}". Remove identity fields before importing.`,
+            )
+          }
+        }
+      }
+    }
+  }
 
-  if (!obj.summary && !obj.tasks && !obj.workflows && !obj.agent_message) {
+  // Support both legacy (summary/agent_message) and new format (summaries[]/agent_messages[])
+  const hasSummary = obj.summary !== undefined || (Array.isArray(obj.summaries) && obj.summaries.length > 0)
+  const hasTasks = Array.isArray(obj.tasks) && obj.tasks.length > 0
+  const hasWorkflows = Array.isArray(obj.workflows) && obj.workflows.length > 0
+  const hasAgentMessage =
+    obj.agent_message !== undefined ||
+    (Array.isArray(obj.agent_messages) && obj.agent_messages.length > 0)
+
+  if (!hasSummary && !hasTasks && !hasWorkflows && !hasAgentMessage) {
     throw new Error(
-      'JSON must contain at least one of: summary, tasks, workflows, agent_message.',
+      'JSON must contain at least one of: summary, summaries, tasks, workflows, agent_message, agent_messages.',
     )
   }
 
-  const payload: AgentImportPayload = {}
-
-  if (obj.summary !== undefined) {
-    if (typeof obj.summary !== 'object' || obj.summary === null || Array.isArray(obj.summary)) {
-      throw new Error('"summary" must be an object.')
-    }
-    const s = obj.summary as Record<string, unknown>
-    if (typeof s.title !== 'string' || !s.title.trim()) {
-      throw new Error('"summary.title" must be a non-empty string.')
-    }
-    // Accept "content" (canonical) or "body" (agent shorthand); prefer first non-blank value.
-    const summaryContent =
-      [s.content, s.body].find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? null
-    if (!summaryContent) {
-      throw new Error('"summary" must have a non-empty "content" or "body" field.')
-    }
-    payload.summary = { title: s.title.trim(), content: summaryContent.trim() }
+  const payload: AgentImportPayload = {
+    version: typeof obj.version === 'string' ? obj.version : undefined,
+    generated_at: typeof obj.generated_at === 'string' ? obj.generated_at : undefined,
+    mode: typeof obj.mode === 'string' ? obj.mode : undefined,
   }
 
+  // Summaries — normalize legacy single object to array
+  if (obj.summaries !== undefined && !Array.isArray(obj.summaries)) {
+    throw new Error('"summaries" must be an array.')
+  }
+  const rawSummaries: unknown[] = []
+  if (Array.isArray(obj.summaries)) rawSummaries.push(...obj.summaries)
+  if (obj.summary !== undefined) rawSummaries.push(obj.summary)
+
+  if (rawSummaries.length > 0) {
+    payload.summaries = rawSummaries.map((s, i) => {
+      if (typeof s !== 'object' || s === null || Array.isArray(s)) {
+        throw new Error(`summaries[${i}] must be an object.`)
+      }
+      const sm = s as Record<string, unknown>
+      if (typeof sm.title !== 'string' || !sm.title.trim()) {
+        throw new Error(`summaries[${i}].title must be a non-empty string.`)
+      }
+      const content =
+        [sm.content, sm.body].find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? null
+      if (!content) {
+        throw new Error(`summaries[${i}] must have a non-empty "content" or "body" field.`)
+      }
+      return {
+        title: sm.title.trim(),
+        content: content.trim(),
+        summary_date: (() => {
+          if (sm.summary_date === undefined || sm.summary_date === null) return undefined
+          if (typeof sm.summary_date !== 'string') {
+            throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
+          }
+          const rawDate = sm.summary_date.trim()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+            throw new Error(`summaries[${i}].summary_date must be a date in YYYY-MM-DD format.`)
+          }
+          // Date.parse rolls over impossible dates (e.g. Feb 31 → Mar 3) instead of
+          // returning NaN; comparing UTC components against the input catches those.
+          const parsed = new Date(rawDate)
+          const [y, mo, day] = rawDate.split('-').map(Number)
+          if (
+            isNaN(parsed.getTime()) ||
+            parsed.getUTCFullYear() !== y ||
+            parsed.getUTCMonth() + 1 !== mo ||
+            parsed.getUTCDate() !== day
+          ) {
+            throw new Error(`summaries[${i}].summary_date is not a valid calendar date.`)
+          }
+          return rawDate
+        })(),
+        source_coverage: Array.isArray(sm.source_coverage)
+          ? (sm.source_coverage as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        key_decisions: Array.isArray(sm.key_decisions)
+          ? (sm.key_decisions as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        blockers: Array.isArray(sm.blockers)
+          ? (sm.blockers as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        next_actions: Array.isArray(sm.next_actions)
+          ? (sm.next_actions as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        category_breakdown:
+          typeof sm.category_breakdown === 'object' && sm.category_breakdown !== null && !Array.isArray(sm.category_breakdown)
+            ? (sm.category_breakdown as Record<string, unknown>)
+            : undefined,
+        workflow_breakdown: Array.isArray(sm.workflow_breakdown) ? sm.workflow_breakdown : undefined,
+        recommended_views: Array.isArray(sm.recommended_views)
+          ? (sm.recommended_views as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+      }
+    })
+  }
+
+  // Workflows
   if (obj.workflows !== undefined) {
     if (!Array.isArray(obj.workflows)) throw new Error('"workflows" must be an array.')
     payload.workflows = (obj.workflows as unknown[]).map((w, i) => {
-      if (typeof w !== 'object' || w === null) {
-        throw new Error(`workflows[${i}] must be an object.`)
-      }
+      if (typeof w !== 'object' || w === null) throw new Error(`workflows[${i}] must be an object.`)
       const wf = w as Record<string, unknown>
       if (typeof wf.name !== 'string' || !wf.name.trim()) {
         throw new Error(`workflows[${i}].name must be a non-empty string.`)
       }
-      // Accept "description" (canonical) or "objective" (agent shorthand); prefer first non-blank value.
       const desc =
         [wf.description, wf.objective].find((v): v is string => typeof v === 'string' && v.trim().length > 0)
       return {
         name: wf.name.trim(),
         description: desc?.trim() || undefined,
+        objective: typeof wf.objective === 'string' ? wf.objective.trim() || undefined : undefined,
+        project_name: typeof wf.project_name === 'string' ? wf.project_name.trim() || undefined : undefined,
+        workflow_category: typeof wf.workflow_category === 'string' ? wf.workflow_category.trim() || undefined : undefined,
+        primary_sources: Array.isArray(wf.primary_sources)
+          ? (wf.primary_sources as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        related_people: Array.isArray(wf.related_people)
+          ? (wf.related_people as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        related_repos: Array.isArray(wf.related_repos)
+          ? (wf.related_repos as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        related_jira_projects: Array.isArray(wf.related_jira_projects)
+          ? (wf.related_jira_projects as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        related_slack_channels: Array.isArray(wf.related_slack_channels)
+          ? (wf.related_slack_channels as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        related_customers: Array.isArray(wf.related_customers)
+          ? (wf.related_customers as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
       }
     })
   }
 
+  // Tasks
   if (obj.tasks !== undefined) {
     if (!Array.isArray(obj.tasks)) throw new Error('"tasks" must be an array.')
     payload.tasks = (obj.tasks as unknown[]).map((t, i) => {
-      if (typeof t !== 'object' || t === null) {
-        throw new Error(`tasks[${i}] must be an object.`)
-      }
-      const task = t as Record<string, unknown>
-      if (typeof task.title !== 'string' || !task.title.trim()) {
-        throw new Error(`tasks[${i}].title must be a non-empty string.`)
-      }
-      if (task.priority !== undefined && !VALID_PRIORITIES.has(task.priority as string)) {
-        throw new Error(`tasks[${i}].priority must be one of: low, medium, high, critical.`)
-      }
-      return {
-        title: (task.title as string).trim(),
-        description:
-          typeof task.description === 'string' ? task.description.trim() || undefined : undefined,
-        priority: task.priority as TaskPriority | undefined,
-        due_at: typeof task.due_at === 'string' ? parseIsoDate(task.due_at) : undefined,
-        workflow_name:
-          typeof task.workflow_name === 'string' ? task.workflow_name.trim() || undefined : undefined,
-      }
+      if (typeof t !== 'object' || t === null) throw new Error(`tasks[${i}] must be an object.`)
+      return parseTaskInput(t as Record<string, unknown>, i)
     })
   }
 
-  if (obj.agent_message !== undefined) {
-    if (typeof obj.agent_message !== 'object' || obj.agent_message === null) {
-      throw new Error('"agent_message" must be an object.')
-    }
-    const m = obj.agent_message as Record<string, unknown>
-    if (typeof m.content !== 'string' || !m.content.trim()) {
-      throw new Error('"agent_message.content" must be a non-empty string.')
-    }
-    payload.agent_message = { content: m.content.trim() }
+  // Agent messages — normalize legacy single object to array
+  if (obj.agent_messages !== undefined && !Array.isArray(obj.agent_messages)) {
+    throw new Error('"agent_messages" must be an array.')
+  }
+  const rawMessages: unknown[] = []
+  if (Array.isArray(obj.agent_messages)) rawMessages.push(...obj.agent_messages)
+  if (obj.agent_message !== undefined) rawMessages.push(obj.agent_message)
+
+  if (rawMessages.length > 0) {
+    payload.agent_messages = rawMessages.map((m, i) => {
+      if (typeof m !== 'object' || m === null) throw new Error(`agent_messages[${i}] must be an object.`)
+      const msg = m as Record<string, unknown>
+      if (typeof msg.content !== 'string' || !msg.content.trim()) {
+        throw new Error(`agent_messages[${i}].content must be a non-empty string.`)
+      }
+      return { content: msg.content.trim() }
+    })
   }
 
   return payload
 }
 
+// ---------------------------------------------------------------------------
+// Preview
+// ---------------------------------------------------------------------------
+
 export function buildPreview(payload: AgentImportPayload): ImportPreview {
+  const tasks = payload.tasks ?? []
+  const enrichedTaskCount = tasks.filter(
+    (t) => t.source_type || t.task_category || t.requester || t.project_name,
+  ).length
+  const summaries = payload.summaries ?? []
   return {
-    summaryTitle: payload.summary?.title ?? null,
+    summaryTitle: summaries[0]?.title ?? null,
     workflowCount: payload.workflows?.length ?? 0,
-    taskCount: payload.tasks?.length ?? 0,
-    hasAgentMessage: !!payload.agent_message,
+    taskCount: tasks.length,
+    hasAgentMessage: (payload.agent_messages?.length ?? 0) > 0,
+    enrichedTaskCount,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate detection
+// ---------------------------------------------------------------------------
+
+function canonicalSource(s: string | undefined): string {
+  if (s === 'agent') return 'chatgpt_agent'
+  if (s === 'user') return 'manual'
+  return s ?? 'chatgpt_agent'
+}
+
+// Map semantically equivalent source values together so that a task imported
+// with source='chatgpt_agent' matches an existing row stored as source='agent',
+// and a 'manual' import matches an existing 'user' row.
+const SOURCE_ALIASES: Record<string, string[]> = {
+  chatgpt_agent: ['chatgpt_agent', 'agent'],
+  agent:         ['chatgpt_agent', 'agent'],
+  manual:        ['manual', 'user'],
+  user:          ['manual', 'user'],
+}
+
+type DupRow = { id: string; source: string; source_type: string | null }
+
+// Pre-fetch all active rows matching any incoming source_ref in a single query
+// to avoid per-task round-trips during the import loop.
+async function buildDupLookup(
+  userId: string,
+  tasks: ImportTaskInput[],
+): Promise<Map<string, DupRow[]>> {
+  const sourceRefs = [
+    ...new Set(tasks.filter((t) => t.source_ref).map((t) => t.source_ref as string)),
+  ]
+  if (sourceRefs.length === 0) return new Map()
+
+  // Chunk source_refs to avoid PostgREST URL length limits.
+  const CHUNK_SIZE = 50
+  const chunks: string[][] = []
+  for (let i = 0; i < sourceRefs.length; i += CHUNK_SIZE) {
+    chunks.push(sourceRefs.slice(i, i + CHUNK_SIZE))
+  }
+
+  // Paginate in 1000-row pages per chunk so no rows are missed regardless of
+  // the project-level Supabase max-rows setting or account size.
+  const lookup = new Map<string, DupRow[]>()
+  const PAGE_SIZE = 1000
+  for (const chunk of chunks) {
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('id, source, source_type, source_ref')
+        .eq('user_id', userId)
+        .in('source_ref', chunk)
+        .in('status', ['open', 'in_progress', 'waiting'])
+        .order('id')
+        .range(from, from + PAGE_SIZE - 1)
+      if (error) throw error
+      for (const row of data ?? []) {
+        const rows = lookup.get(row.source_ref) ?? []
+        rows.push({ id: row.id, source: row.source, source_type: row.source_type ?? null })
+        lookup.set(row.source_ref, rows)
+      }
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+  }
+  return lookup
+}
+
+// Mirror the original per-task logic: when source_type is present, match strictly;
+// when absent, match any subtype sharing the same source + source_ref.
+function lookupDupId(lookup: Map<string, DupRow[]>, task: ImportTaskInput): string | null {
+  if (!task.source_ref) return null
+  const rows = lookup.get(task.source_ref) ?? []
+  const effectiveSource = task.source ?? 'chatgpt_agent'
+  const sourcesToCheck = SOURCE_ALIASES[effectiveSource] ?? [effectiveSource]
+  for (const row of rows) {
+    if (!sourcesToCheck.includes(row.source)) continue
+    if (task.source_type && row.source_type !== task.source_type) continue
+    return row.id
+  }
+  return null
+}
+
+async function updateExistingTask(
+  taskId: string,
+  task: ImportTaskInput,
+  userId: string,
+): Promise<void> {
+  const updates: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  }
+  if (task.source_title) updates.source_title = task.source_title
+  if (task.source_url) updates.source_url = task.source_url
+  if (task.last_source_at) updates.last_source_at = task.last_source_at
+  if (task.description) updates.description = task.description
+  if (task.urgency_score !== undefined) updates.urgency_score = task.urgency_score
+  if (task.group_keys) updates.group_keys = task.group_keys
+  if (task.metadata) updates.metadata = task.metadata
+
+  const { error: updateError } = await supabase.from('tasks').update(updates).eq('id', taskId)
+  if (updateError) throw updateError
+
+  const { error: eventError } = await supabase.from('task_events').insert({
+    user_id: userId,
+    task_id: taskId,
+    actor: 'agent',
+    event_type: 'updated',
+    details: { source: 'import_duplicate_update', source_ref: task.source_ref },
+  })
+  if (eventError) throw eventError
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +698,7 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
   if (!session) throw new Error('Not authenticated')
   const userId = session.user.id
 
-  // 1. Insert workflows; build name → id map for linking tasks/summary.
+  // 1. Insert workflows; build name → id map.
   const workflowNameToId = new Map<string, string>()
   if (payload.workflows?.length) {
     const { data, error } = await supabase
@@ -264,6 +708,15 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
           user_id: userId,
           name: w.name,
           description: w.description ?? null,
+          objective: w.objective ?? null,
+          project_name: w.project_name ?? null,
+          workflow_category: w.workflow_category ?? null,
+          primary_sources: w.primary_sources ?? [],
+          related_people: w.related_people ?? [],
+          related_repos: w.related_repos ?? [],
+          related_jira_projects: w.related_jira_projects ?? [],
+          related_slack_channels: w.related_slack_channels ?? [],
+          related_customers: w.related_customers ?? [],
           status: 'active',
         })),
       )
@@ -272,75 +725,202 @@ export async function executeImport(payload: AgentImportPayload): Promise<Import
     for (const row of data) workflowNameToId.set(row.name, row.id)
   }
 
-  // Default workflow id for summary / agent_message (first inserted workflow).
   const firstWorkflowId =
     workflowNameToId.size > 0 ? workflowNameToId.values().next().value : null
 
-  // 2. Insert summary.
+  // 2. Insert all summaries; link tasks to the first one.
   let summaryId: string | null = null
-  if (payload.summary) {
+  const summaries = payload.summaries ?? []
+  if (summaries.length > 0) {
     const { data, error } = await supabase
       .from('summaries')
-      .insert({
-        user_id: userId,
-        title: payload.summary.title,
-        content: payload.summary.content,
-        source: 'agent',
-        status: 'active',
-        workflow_id: firstWorkflowId,
-      })
-      .select('id')
-      .single()
-    if (error) throw error
-    summaryId = data.id
-  }
-
-  // 3. Insert tasks, then task_events.
-  let taskCount = 0
-  if (payload.tasks?.length) {
-    const { data: tasks, error: taskError } = await supabase
-      .from('tasks')
       .insert(
-        payload.tasks.map((t) => ({
+        summaries.map((s) => ({
           user_id: userId,
-          title: t.title,
-          description: t.description ?? null,
-          status: 'open',
-          priority: t.priority ?? 'medium',
-          due_at: t.due_at ?? null,
+          title: s.title,
+          content: s.content ?? s.body ?? '',
           source: 'agent',
-          workflow_id: t.workflow_name ? (workflowNameToId.get(t.workflow_name) ?? null) : null,
-          summary_id: summaryId,
+          status: 'active',
+          workflow_id: firstWorkflowId,
+          summary_date: s.summary_date ?? null,
+          source_coverage: s.source_coverage ?? [],
+          key_decisions: s.key_decisions ?? [],
+          blockers: s.blockers ?? [],
+          next_actions: s.next_actions ?? [],
+          category_breakdown: s.category_breakdown ?? {},
+          workflow_breakdown: s.workflow_breakdown ?? [],
+          recommended_views: s.recommended_views ?? [],
         })),
       )
       .select('id')
-    if (taskError) throw taskError
-    taskCount = tasks.length
-
-    const { error: eventError } = await supabase.from('task_events').insert(
-      tasks.map((t) => ({
-        user_id: userId,
-        task_id: t.id,
-        actor: 'agent',
-        event_type: 'created',
-        new_status: 'open',
-        details: { source: 'import' },
-      })),
-    )
-    if (eventError) throw eventError
+    if (error) throw error
+    summaryId = data[0]?.id ?? null
   }
 
-  // 4. Insert agent_message.
-  if (payload.agent_message) {
-    const { error } = await supabase.from('agent_messages').insert({
-      user_id: userId,
-      content: payload.agent_message.content,
-      role: 'agent',
-      workflow_id: firstWorkflowId,
-      context: {},
-    })
+  // 3. Insert tasks with duplicate checking.
+  let taskCount = 0
+  let duplicatesUpdated = 0
+  let batchDuplicatesSkipped = 0
+
+  if (payload.tasks?.length) {
+    const tasksToInsert: Record<string, unknown>[] = []
+    const skippedTaskIds: string[] = []
+    // Pre-fetch all potential duplicates in one query to avoid N+1 round-trips.
+    const dupLookup = await buildDupLookup(userId, payload.tasks)
+    // Track dedup keys seen within this batch so two tasks with the same
+    // source_ref in a single payload don't both get inserted.
+    // batchSeen: canonical|source_ref → set of source_types already processed.
+    // Empty string means a no-source_type (wildcard) task was processed.
+    // Mirrors lookupDupId semantics exactly:
+    //   - task WITH source_type X: dup if X or '' (wildcard) already in set
+    //   - task WITHOUT source_type: dup if any variant already in set
+    // This prevents two tasks with different subtypes (e.g. GitHub PR vs Issue)
+    // from collapsing into the same batch slot.
+    const batchSeen = new Map<string, Set<string>>()
+
+    function isBatchDup(task: ImportTaskInput): boolean {
+      if (!task.source_ref) return false
+      const seen = batchSeen.get(`${canonicalSource(task.source)}|${task.source_ref}`)
+      if (!seen) return false
+      return task.source_type ? (seen.has(task.source_type) || seen.has('')) : seen.size > 0
+    }
+
+    function markBatchSeen(task: ImportTaskInput): void {
+      if (!task.source_ref) return
+      const key = `${canonicalSource(task.source)}|${task.source_ref}`
+      const existing = batchSeen.get(key) ?? new Set<string>()
+      existing.add(task.source_type ?? '')
+      batchSeen.set(key, existing)
+    }
+
+    for (const t of payload.tasks) {
+      if (isBatchDup(t)) {
+        batchDuplicatesSkipped++
+        continue
+      }
+
+      const dupId = lookupDupId(dupLookup, t)
+      if (dupId) {
+        await updateExistingTask(dupId, t, userId)
+        skippedTaskIds.push(dupId)
+        duplicatesUpdated++
+        markBatchSeen(t)
+        continue
+      }
+
+      markBatchSeen(t)
+
+      const effectiveSource: TaskSource = t.source ?? 'chatgpt_agent'
+      const tags = t.tags ?? []
+      const metadata = t.metadata ?? {}
+
+      // Auto-generate group_keys if agent did not include them.
+      const group_keys =
+        t.group_keys && Object.keys(t.group_keys).length > 0
+          ? t.group_keys
+          : generateTaskGroupKeys({
+              source: effectiveSource,
+              source_type: t.source_type,
+              task_category: t.task_category,
+              workflow_name: t.workflow_name,
+              project_name: t.project_name,
+              due_at: t.due_at,
+              requester: t.requester,
+              owner: t.owner,
+            })
+
+      // Auto-compute urgency/importance if agent did not include them.
+      const scoringInput = {
+        priority: t.priority,
+        due_at: t.due_at,
+        source: effectiveSource,
+        source_type: t.source_type,
+        task_category: t.task_category,
+        tags,
+        metadata,
+      }
+      const urgency_score = t.urgency_score ?? computeUrgencyScore(scoringInput)
+      const importance_score = t.importance_score ?? computeImportanceScore(scoringInput)
+
+      const workflowId = t.workflow_name
+        ? (workflowNameToId.get(t.workflow_name) ?? null)
+        : null
+
+      tasksToInsert.push({
+        user_id: userId,
+        title: t.title,
+        description: t.description ?? null,
+        status: t.status ?? 'open',
+        priority: t.priority ?? 'medium',
+        due_at: t.due_at ?? null,
+        source: effectiveSource,
+        source_type: t.source_type ?? null,
+        source_ref: t.source_ref ?? null,
+        source_title: t.source_title ?? null,
+        source_url: t.source_url ?? null,
+        last_source_at: t.last_source_at ?? null,
+        task_category: t.task_category ?? null,
+        task_subcategory: t.task_subcategory ?? null,
+        workflow_name: t.workflow_name ?? null,
+        project_name: t.project_name ?? null,
+        requester: t.requester ?? null,
+        owner: t.owner ?? null,
+        tags,
+        group_keys,
+        metadata,
+        urgency_score,
+        importance_score,
+        workflow_id: workflowId,
+        summary_id: summaryId,
+      })
+    }
+
+    if (tasksToInsert.length > 0) {
+      const { data: tasks, error: taskError } = await supabase
+        .from('tasks')
+        .insert(tasksToInsert)
+        .select('id, status, source_type, task_category, workflow_name, project_name')
+      if (taskError) throw taskError
+      taskCount = tasks.length
+
+      const { error: eventError } = await supabase.from('task_events').insert(
+        tasks.map((t: Record<string, unknown>) => ({
+          user_id: userId,
+          task_id: t.id,
+          actor: 'agent',
+          event_type: 'created',
+          new_status: t.status ?? 'open',
+          source_type: t.source_type ?? null,
+          task_category: t.task_category ?? null,
+          workflow_name: t.workflow_name ?? null,
+          project_name: t.project_name ?? null,
+          details: { source: 'import' },
+        })),
+      )
+      if (eventError) throw eventError
+    }
+  }
+
+  // 4. Insert agent messages.
+  const messages = payload.agent_messages ?? []
+  if (messages.length > 0) {
+    const { error } = await supabase.from('agent_messages').insert(
+      messages.map((m) => ({
+        user_id: userId,
+        content: m.content,
+        role: 'agent',
+        workflow_id: firstWorkflowId,
+        context: {},
+      })),
+    )
     if (error) throw error
   }
 
-  return { taskCount, workflowCount: workflowNameToId.size, hasSummary: !!summaryId }
+  return {
+    taskCount,
+    workflowCount: workflowNameToId.size,
+    hasSummary: !!summaryId,
+    duplicatesUpdated,
+    batchDuplicatesSkipped,
+  }
 }

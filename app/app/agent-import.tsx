@@ -132,6 +132,12 @@ export default function AgentImportScreen() {
             <ResultLine label="Tasks created" value={result.taskCount} />
             <ResultLine label="Workflows created" value={result.workflowCount} />
             {result.hasSummary && <ResultLine label="Summary saved" value="Yes" />}
+            {result.duplicatesUpdated > 0 && (
+              <ResultLine label="Duplicates updated" value={result.duplicatesUpdated} />
+            )}
+            {result.batchDuplicatesSkipped > 0 && (
+              <ResultLine label="Duplicates skipped" value={result.batchDuplicatesSkipped} />
+            )}
           </View>
           <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/')}>
             <Text style={styles.primaryBtnText}>View Tasks</Text>
@@ -200,6 +206,9 @@ export default function AgentImportScreen() {
                 label="Tasks"
                 value={preview.taskCount > 0 ? String(preview.taskCount) : 'None'}
               />
+              {preview.enrichedTaskCount > 0 && (
+                <PreviewRow label="Enriched tasks" value={String(preview.enrichedTaskCount)} />
+              )}
               {preview.hasAgentMessage && <PreviewRow label="Agent message" value="Yes" />}
 
               <TouchableOpacity style={[styles.importBtn, styles.importBtnTop]} onPress={handleImport}>
@@ -210,12 +219,11 @@ export default function AgentImportScreen() {
 
           <Text style={styles.hint}>
             Must contain at least one of:{' '}
-            <Text style={styles.mono}>summary</Text>, <Text style={styles.mono}>tasks</Text>,{' '}
-            <Text style={styles.mono}>workflows</Text>, <Text style={styles.mono}>agent_message</Text>.{'\n'}
-            Summary text: <Text style={styles.mono}>content</Text> or <Text style={styles.mono}>body</Text>.{' '}
-            Workflow text: <Text style={styles.mono}>description</Text> or <Text style={styles.mono}>objective</Text>.{'\n'}
-            Extra fields (mode, version, source_ref, etc.) are ignored.{'\n'}
-            Credential fields (user_id, api_key, token, etc.) are rejected.
+            <Text style={styles.mono}>summaries</Text>, <Text style={styles.mono}>tasks</Text>,{' '}
+            <Text style={styles.mono}>workflows</Text>, <Text style={styles.mono}>agent_messages</Text>.{'\n'}
+            Legacy keys also accepted: <Text style={styles.mono}>summary</Text>, <Text style={styles.mono}>agent_message</Text>.{'\n'}
+            Tasks support: <Text style={styles.mono}>source</Text>, <Text style={styles.mono}>source_type</Text>, <Text style={styles.mono}>task_category</Text>, <Text style={styles.mono}>requester</Text>, <Text style={styles.mono}>project_name</Text>.{'\n'}
+            Credential fields (api_key, token, password, etc.) are rejected automatically.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
