@@ -32,6 +32,18 @@ export const VIEW_MODES: GroupViewMode[] = [
   'priority',
 ]
 
+export type SortKey = 'urgency' | 'due' | 'created' | 'priority' | 'source'
+
+export const SORT_KEY_LABELS: Record<SortKey, string> = {
+  urgency: 'Urgency',
+  due: 'Due Date',
+  created: 'Created',
+  priority: 'Priority',
+  source: 'Source',
+}
+
+export const SORT_KEYS: SortKey[] = ['urgency', 'due', 'created', 'priority', 'source']
+
 export interface TaskGroup {
   key: string
   label: string
@@ -58,11 +70,38 @@ const PRIORITY_RANK: Record<string, number> = {
   low: 3,
 }
 
-export function sortTasks(tasks: Task[]): Task[] {
+function comparePrimary(a: Task, b: Task, key: SortKey): number {
+  switch (key) {
+    case 'due':
+      if (a.due_at && b.due_at) return new Date(a.due_at).getTime() - new Date(b.due_at).getTime()
+      if (a.due_at) return -1
+      if (b.due_at) return 1
+      return 0
+    case 'created':
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    case 'priority': {
+      const pa = PRIORITY_RANK[a.priority] ?? 4
+      const pb = PRIORITY_RANK[b.priority] ?? 4
+      return pa - pb
+    }
+    case 'source':
+      return a.source.localeCompare(b.source)
+    default:
+      return 0
+  }
+}
+
+export function sortTasks(tasks: Task[], sortKey: SortKey = 'urgency'): Task[] {
   return [...tasks].sort((a, b) => {
     const sa = STATUS_RANK[a.status] ?? 5
     const sb = STATUS_RANK[b.status] ?? 5
     if (sa !== sb) return sa - sb
+
+    // User-chosen primary sort key (when not urgency, apply before the default chain)
+    if (sortKey !== 'urgency') {
+      const primary = comparePrimary(a, b, sortKey)
+      if (primary !== 0) return primary
+    }
 
     const ua = a.urgency_score ?? 0
     const ub = b.urgency_score ?? 0
@@ -95,8 +134,8 @@ function isHighPriority(t: Task): boolean {
   return t.priority === 'high' || t.priority === 'critical'
 }
 
-function makeGroup(key: string, tasks: Task[]): TaskGroup {
-  const sorted = sortTasks(tasks)
+function makeGroup(key: string, tasks: Task[], sortKey: SortKey = 'urgency'): TaskGroup {
+  const sorted = sortTasks(tasks, sortKey)
   const activeTasks = tasks.filter(isActive)
   const nextDue =
     activeTasks
@@ -135,7 +174,7 @@ function getGroupKey(task: Task, mode: GroupViewMode): string {
   }
 }
 
-export function groupTasks(tasks: Task[], mode: GroupViewMode): TaskGroup[] {
+export function groupTasks(tasks: Task[], mode: GroupViewMode, sortKey: SortKey = 'urgency'): TaskGroup[] {
   const map = new Map<string, Task[]>()
   for (const task of tasks) {
     const key = getGroupKey(task, mode)
@@ -143,7 +182,7 @@ export function groupTasks(tasks: Task[], mode: GroupViewMode): TaskGroup[] {
     map.get(key)!.push(task)
   }
 
-  const groups = Array.from(map.entries()).map(([key, t]) => makeGroup(key, t))
+  const groups = Array.from(map.entries()).map(([key, t]) => makeGroup(key, t, sortKey))
 
   if (mode === 'time') {
     groups.sort((a, b) => {
